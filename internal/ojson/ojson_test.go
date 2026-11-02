@@ -51,3 +51,21 @@ func TestSetAppendsANewKeyAndKeepsAnOldOnesPlace(t *testing.T) {
 		t.Fatal(string(out))
 	}
 }
+
+func TestMarshalIndentWritesWhatIndentFoundInTheInput(t *testing.T) {
+	for _, in := range []string{"{\n    \"a\": [\n        1\n    ],\n    \"b\": {}\n}\n", "{\n\t\"a\": [\n\t\t1\n\t],\n\t\"b\": {}\n}\n"} {
+		v, err := Parse([]byte(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _ := MarshalIndent(v, Indent([]byte(in)))
+		if string(out) != in {
+			t.Fatal(string(out))
+		}
+	}
+	for _, in := range []string{`{"a": 1}`, "", "{\n}\n"} {
+		if got := Indent([]byte(in)); got != "  " {
+			t.Fatalf("%q gave %q", in, got)
+		}
+	}
+}

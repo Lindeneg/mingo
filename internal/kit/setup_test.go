@@ -35,6 +35,19 @@ func TestPlanScriptsMovesEachHeavyScriptBehindTheShimOnce(t *testing.T) {
 	}
 }
 
+func TestPlanScriptsKeepsTheIndentationOfPackageJson(t *testing.T) {
+	p := project(t, "modules = [\"heavy\"]\n[ci]\nstack = \"npm\"\n[heavy]\nscripts = [\"test:unit\"]\n[[roles]]\nname = \"lead\"\n")
+	pkg := "{\n    \"name\": \"demo\",\n    \"scripts\": {\n        \"test:unit\": \"vitest run\"\n    }\n}\n"
+	steps, err := PlanScripts([]Module{{Name: "heavy"}}, p, reader(map[string]string{"package.json": pkg}))
+	if err != nil || len(steps) != 1 || steps[0].Action != Update {
+		t.Fatal(steps, err)
+	}
+	want := "{\n    \"name\": \"demo\",\n    \"scripts\": {\n        \"test:unit\": \"node tools/heavy.mjs test:unit -- npm run test:unit:run\",\n        \"test:unit:run\": \"vitest run\"\n    }\n}\n"
+	if steps[0].File.Text != want {
+		t.Fatal(steps[0].File.Text)
+	}
+}
+
 func TestPortsWritesTheEnvFromTheExampleOnceAndSaysWhenItCannot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

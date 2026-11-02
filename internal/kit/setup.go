@@ -198,7 +198,7 @@ func PlanScripts(mods []Module, p *config.Project, read func(path string) ([]byt
 	}
 	step := Step{File: File{Path: Manifest, Module: "heavy", Text: string(old)}, Action: Same, Old: old, Owned: true, What: "the heavy scripts"}
 	if changed {
-		next, err := ojson.Marshal(root)
+		next, err := ojson.MarshalIndent(root, ojson.Indent(old))
 		if err != nil {
 			return nil, err
 		}

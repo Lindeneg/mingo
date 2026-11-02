@@ -119,16 +119,31 @@ func value(dec *json.Decoder) (any, error) {
 }
 
 func Marshal(v any) ([]byte, error) {
+	return MarshalIndent(v, "  ")
+}
+
+func MarshalIndent(v any, unit string) ([]byte, error) {
 	var b bytes.Buffer
-	if err := write(&b, v, 0); err != nil {
+	if err := write(&b, v, 0, unit); err != nil {
 		return nil, err
 	}
 	b.WriteByte('\n')
 	return b.Bytes(), nil
 }
 
-func write(b *bytes.Buffer, v any, depth int) error {
-	indent := strings.Repeat("  ", depth+1)
+// the indentation of the first indented line, two spaces when no line is indented
+func Indent(data []byte) string {
+	for _, line := range strings.Split(string(data), "\n") {
+		rest := strings.TrimLeft(line, " \t")
+		if rest != "" && len(rest) < len(line) {
+			return line[:len(line)-len(rest)]
+		}
+	}
+	return "  "
+}
+
+func write(b *bytes.Buffer, v any, depth int, unit string) error {
+	indent := strings.Repeat(unit, depth+1)
 	switch t := v.(type) {
 	case *Object:
 		if len(t.keys) == 0 {
@@ -140,7 +155,7 @@ func write(b *bytes.Buffer, v any, depth int) error {
 			b.WriteString(indent)
 			writeString(b, k)
 			b.WriteString(": ")
-			if err := write(b, t.vals[k], depth+1); err != nil {
+			if err := write(b, t.vals[k], depth+1, unit); err != nil {
 				return err
 			}
 			if i < len(t.keys)-1 {
@@ -148,7 +163,7 @@ func write(b *bytes.Buffer, v any, depth int) error {
 			}
 			b.WriteByte('\n')
 		}
-		b.WriteString(strings.Repeat("  ", depth) + "}")
+		b.WriteString(strings.Repeat(unit, depth) + "}")
 	case []any:
 		if len(t) == 0 {
 			b.WriteString("[]")
@@ -157,7 +172,7 @@ func write(b *bytes.Buffer, v any, depth int) error {
 		b.WriteString("[\n")
 		for i, item := range t {
 			b.WriteString(indent)
-			if err := write(b, item, depth+1); err != nil {
+			if err := write(b, item, depth+1, unit); err != nil {
 				return err
 			}
 			if i < len(t)-1 {
@@ -165,7 +180,7 @@ func write(b *bytes.Buffer, v any, depth int) error {
 			}
 			b.WriteByte('\n')
 		}
-		b.WriteString(strings.Repeat("  ", depth) + "]")
+		b.WriteString(strings.Repeat(unit, depth) + "]")
 	case string:
 		writeString(b, t)
 	case json.Number:
