@@ -99,6 +99,8 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 | heavy | `tools/heavy.mjs`, which puts a Node project's heavy scripts behind the slots |
 | ports | a port offset per role in each clone's `.env` |
 
+The guards catch mistakes, not a session that means to get round them.
+
 ## A new server
 
 The `provision` folder turns a fresh Ubuntu server into a mingo machine: a user for the sessions, SSH by key only, a firewall, Docker, Node, Go, gh, tmux and Claude Code.
@@ -148,6 +150,7 @@ ci = "ci"                          # the workflow whose jobs are the checks
 checks = ["check", "test", "build", "security"]
 gate = ["pnpm check", "pnpm test", "pnpm build"]
 tags = ["(lead)", "(dev)"]         # what a description's first line may be
+reviewer = "claude[bot]"           # whose review comments count, anyone's by default
 local_runs = ["pnpm check", "mingo gate"]
 generate_list = ["pnpm exec tsx tools/generate.ts --list"]
 generate = ["pnpm generate"]

@@ -84,3 +84,11 @@ func TestTheLockReadsBackWhatItWrites(t *testing.T) {
 		t.Fatal(empty, err)
 	}
 }
+
+func TestTheLockReadsBackAPathWithCharactersGoQuotesOtherwise(t *testing.T) {
+	odd := Locked{Path: "docs/\a\v\x7f é \"q\"\\.md", Module: "m", Mingo: "v", Sum: "s"}
+	back, err := ParseLock((&Lock{Files: []Locked{odd}}).Bytes())
+	if err != nil || len(back.Files) != 1 || back.Files[0] != odd {
+		t.Fatal(back, err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -67,6 +68,20 @@ func (e *env) secret(args []string) error {
 		fmt.Fprint(e.out, "paste what claude setup-token printed: ")
 		if sys.SetEcho(fd, false) == nil {
 			defer sys.SetEcho(fd, true)
+			// ctrl c ends mingo before the defer runs, so the echo comes back here too
+			interrupt := make(chan os.Signal, 1)
+			signal.Notify(interrupt, os.Interrupt)
+			defer func() {
+				signal.Stop(interrupt)
+				close(interrupt)
+			}()
+			go func() {
+				if _, ok := <-interrupt; ok {
+					sys.SetEcho(fd, true)
+					fmt.Fprintln(e.out)
+					os.Exit(130)
+				}
+			}()
 		}
 		token, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		fmt.Fprintln(e.out)
@@ -143,10 +158,12 @@ func (e *env) newProject(args []string) error {
 	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(e.out, "config: %s\n", file)
+	// a config that does not load is taken back, so the next try is not refused for it
 	if _, err := config.Load(name); err != nil {
+		os.Remove(file)
 		return err
 	}
+	fmt.Fprintf(e.out, "config: %s\n", file)
 	if err := e.setup(name); err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ type Workflow struct {
 	Checks        []string `toml:"checks"`
 	Gate          []string `toml:"gate"`
 	LocalRuns     []string `toml:"local_runs"`
+	Reviewer      string   `toml:"reviewer"`
 	ReviewLine    string   `toml:"review_line"`
 	NoFindings    string   `toml:"no_findings"`
 	ReviewHeading string   `toml:"review_heading"`

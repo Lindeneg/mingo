@@ -38,6 +38,23 @@ func TestProjectAddWritesAConfigThatLoadsAndRefusesToOverwrite(t *testing.T) {
 	}
 }
 
+func TestProjectEditRunsAnEditorThatTakesArguments(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	editor := filepath.Join(h.root, "editor")
+	said := filepath.Join(h.root, "said")
+	h.write(editor, "#!/usr/bin/env bash\necho \"$*\" >"+shellQuote(said)+"\n")
+	if err := os.Chmod(editor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.runIn("", []string{"EDITOR=" + editor + " --wait"}, h.bin, "project", "edit", "demo"); r.code != 0 {
+		t.Fatal(r.out)
+	}
+	if h.read(said) != "--wait "+filepath.Join(h.config, "projects", "demo.toml")+"\n" {
+		t.Fatal(h.read(said))
+	}
+}
+
 func TestPathMemoryRepoAndDefaultAnswerForATarget(t *testing.T) {
 	h := newHome(t)
 	h.addDemo()

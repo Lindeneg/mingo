@@ -62,7 +62,7 @@ func (l *Lock) Bytes() []byte {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "[[file]]\npath = %q\nmodule = %q\nmingo = %q\nsha256 = %q\n", f.Path, f.Module, f.Mingo, f.Sum)
+		fmt.Fprintf(&b, "[[file]]\npath = %s\nmodule = %s\nmingo = %s\nsha256 = %s\n", tomlString(f.Path), tomlString(f.Module), tomlString(f.Mingo), tomlString(f.Sum))
 	}
 	return b.Bytes()
 }

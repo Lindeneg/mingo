@@ -191,6 +191,39 @@ func TestMergeHoldsAPullRequestWithNoReviewComment(t *testing.T) {
 	}), []string{"not reviewed: no comment begins with `review: <head sha>`"})
 }
 
+func TestMergeCountsOnlyTheReviewersCommentsWhenOneIsSet(t *testing.T) {
+	m := mergeCase{t, loadProject(t, "acme", strings.Replace(acmeTOML, "[workflow]\n", "[workflow]\nreviewer = \"claude[bot]\"\n", 1))}
+	bot := func(c Comment) Comment { c.Author = "claude[bot]"; return c }
+	mine := review(head, "no findings")
+	mine.Author = "claude"
+	equal(t, m.problems(func(pr *PullRequest) { pr.Comments = []Comment{mine} }),
+		[]string{"not reviewed: no comment from claude[bot] begins with `review: <head sha>`"})
+	equal(t, m.problems(func(pr *PullRequest) { pr.Comments = []Comment{bot(review(head, "no findings")), mine} }), nil)
+	held := bot(review(head, "findings: 1", "2026-10-10T10:00:00Z"))
+	later := review(head, "no findings", "2026-10-10T11:00:00Z")
+	later.Author = "Lindeneg"
+	equal(t, m.problems(func(pr *PullRequest) { pr.Comments = []Comment{held, later} }),
+		[]string{"the review of the head says `findings: 1`, not `no findings`"})
+}
+
+func TestRunMergeReadsEachCommentsAuthorFromGitHub(t *testing.T) {
+	p := loadProject(t, "acme", strings.Replace(acmeTOML, "[workflow]\n", "[workflow]\nreviewer = \"claude[bot]\"\n", 1))
+	byBot := review(head, "no findings")
+	byBot.Author = "claude[bot]"
+	if g := newFakeGH(t, p, facts(func(pr *PullRequest) { pr.Comments = []Comment{byBot} }), nil); g.merge("41") != ExitOK {
+		t.Fatal(g.printed())
+	}
+	g := newFakeGH(t, p, facts(nil), nil)
+	if g.merge("41") != ExitFailed || !strings.Contains(g.out.String(), "not reviewed: no comment from claude[bot]") {
+		t.Fatal(g.printed())
+	}
+	failed := newFakeGH(t, p, facts(nil), map[string]Result{"api repos/{owner}/{repo}/issues/41/comments": {Code: 1, Stderr: "HTTP 404"}})
+	if failed.merge("41") != ExitFailed || len(failed.merges()) != 0 {
+		t.Fatal(failed.printed())
+	}
+	equal(t, failed.printed(), []string{"reading the comments failed:", "HTTP 404"})
+}
+
 func TestMergeReadsTheNewestReviewWhateverTheOrderTheCommentsComeIn(t *testing.T) {
 	m := newMergeCase(t)
 	earlier := review(head, "no findings", "2026-10-10T10:00:00Z")
@@ -438,6 +471,12 @@ func newFakeGH(t *testing.T, p *config.Project, f MergeFacts, answers map[string
 		case "api graphql":
 			unresolved := make([]bool, f.UnresolvedThreads)
 			return ok([]any{threads(true, true), threads(unresolved...)}), nil
+		case "api repos/{owner}/{repo}/issues/41/comments":
+			page := []map[string]any{}
+			for _, c := range f.PullRequest.Comments {
+				page = append(page, map[string]any{"user": map[string]string{"login": c.Author}, "body": c.Body, "created_at": c.CreatedAt})
+			}
+			return ok([]any{[]any{}, page}), nil
 		}
 		return ok(map[string]int{"behind_by": f.BehindBy, "ahead_by": 2}), nil
 	}
@@ -538,7 +577,7 @@ func TestRunMergeNeverApprovesDismissesBypassesOrRerunsAnything(t *testing.T) {
 			t.Fatal(w)
 		}
 	}
-	equal(t, verbs, []string{"auth status", "pr view", "api graphql", "api repos/{owner}/{repo}/compare/master..." + head, "pr merge"})
+	equal(t, verbs, []string{"auth status", "pr view", "api repos/{owner}/{repo}/issues/41/comments", "api graphql", "api repos/{owner}/{repo}/compare/master..." + head, "pr merge"})
 }
 
 func TestRunMergePrintsEveryHeldPointAndDoesNotMerge(t *testing.T) {

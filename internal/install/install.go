@@ -101,6 +101,32 @@ func hook(matcher, command, status string) *ojson.Object {
 	return entry
 }
 
+type wrongType struct{ key, want string }
+
+func (e wrongType) Error() string {
+	return e.key + " is not a JSON " + e.want
+}
+
+// a key of another type is the user's, so mingo leaves the file rather than replace it
+func checkTypes(root *ojson.Object) error {
+	for _, k := range []struct{ parent, key string }{{"permissions", "deny"}, {"hooks", "PreToolUse"}} {
+		v, ok := root.Get(k.parent)
+		if !ok {
+			continue
+		}
+		o, ok := v.(*ojson.Object)
+		if !ok {
+			return wrongType{k.parent, "object"}
+		}
+		if v, ok := o.Get(k.key); ok {
+			if _, ok := v.([]any); !ok {
+				return wrongType{k.parent + "." + k.key, "list"}
+			}
+		}
+	}
+	return nil
+}
+
 // keeps every key already there and adds what mingo needs only once
 func MergeSettings(data []byte, home string) ([]byte, []byte, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
@@ -113,6 +139,9 @@ func MergeSettings(data []byte, home string) ([]byte, []byte, error) {
 	root, ok := v.(*ojson.Object)
 	if !ok {
 		return nil, nil, errors.New("not a JSON object")
+	}
+	if err := checkTypes(root); err != nil {
+		return nil, nil, err
 	}
 	before, _ := ojson.Marshal(root)
 
@@ -188,6 +217,10 @@ func Settings(home string, out io.Writer) error {
 		return err
 	}
 	before, after, err := MergeSettings(data, home)
+	var wrong wrongType
+	if errors.As(err, &wrong) {
+		return fmt.Errorf("%s has a %s key that is not a JSON %s, left as it is", file, wrong.key, wrong.want)
+	}
 	if err != nil {
 		return fmt.Errorf("%s is not valid JSON, left as it is", file)
 	}
@@ -195,7 +228,11 @@ func Settings(home string, out io.Writer) error {
 		fmt.Fprintf(out, "claude settings: %s unchanged\n", file)
 		return nil
 	}
-	if err := writeAtomic(file, after, 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(file); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeAtomic(file, after, mode); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "claude settings: %s\n", file)

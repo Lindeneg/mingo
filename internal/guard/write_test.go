@@ -20,7 +20,7 @@ func newWriteCase(t *testing.T) writeCase {
 	home := filepath.Join(root, "home")
 	project := filepath.Join(home, "dev", "demo", "lead")
 	return writeCase{
-		env:     WriteEnv{ProjectDir: project, TempDir: filepath.Join(root, "tmp"), Home: home},
+		env:     WriteEnv{ProjectDir: project, TempDir: filepath.Join(root, "tmp"), Home: home, StateDir: filepath.Join(root, "tmp", "mingo")},
 		project: project,
 	}
 }
@@ -60,6 +60,19 @@ func TestWriteAllowsTempMemoryAndPlans(t *testing.T) {
 		if out := c.write(t, path, ""); out != "" {
 			t.Fatal(path, out)
 		}
+	}
+}
+
+func TestWriteDeniesMingosStateFolderInsideTheTempFolder(t *testing.T) {
+	c := newWriteCase(t)
+	for _, path := range []string{c.env.StateDir + "/other/lead.stop", c.env.StateDir + "/heavy/slot-1", c.env.StateDir} {
+		out := c.write(t, path, "")
+		if !denied(t, out) || !strings.Contains(out, "is in mingo's state folder, which only mingo writes") {
+			t.Fatal(path, out)
+		}
+	}
+	if out := c.write(t, c.env.TempDir+"/mingo-notes.md", ""); out != "" {
+		t.Fatal(out)
 	}
 }
 

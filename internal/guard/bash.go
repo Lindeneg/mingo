@@ -10,6 +10,7 @@ import (
 const (
 	killReason    = "Never end a process by its name. Several projects share this machine, so a process ended by name is every project's. End your own process by its id, its path or its port."
 	encodedReason = "An encoded PowerShell command cannot be checked for a process ended by its name. Pass it as plain text."
+	everyReason   = "Never end every process with kill -1. Several projects share this machine, so it ends every project's."
 )
 
 type dialect int
@@ -687,6 +688,26 @@ func positionalArgs(args []string) []string {
 	return positional
 }
 
+// the first option is the signal and every word after it a process id, and the id -1 is every
+// process the user may signal
+func signalsEveryProcess(args []string) bool {
+	i := 0
+	if len(args) > 0 {
+		switch a := args[0]; {
+		case a == "-l" || a == "-L":
+			return false
+		case a == "-s" || a == "-n":
+			i = 2
+		case strings.HasPrefix(a, "-"):
+			i = 1
+		}
+	}
+	if i < len(args) && args[i] == "--" {
+		i++
+	}
+	return i < len(args) && slices.Contains(args[i:], "-1")
+}
+
 func checkKillRules(st statement, d dialect, depth int) string {
 	segs := segments(st, d)
 	for k, s := range segs {
@@ -729,6 +750,9 @@ func checkKillRules(st statement, d dialect, depth int) string {
 			}
 		}
 		if s.cmd == "kill" {
+			if d == bashDialect && signalsEveryProcess(s.args) {
+				return everyReason
+			}
 			if d == powershellDialect && slices.ContainsFunc(s.args, func(a string) bool { return isNameParameter(a) || isInputObjectParameter(a) }) {
 				return killReason
 			}

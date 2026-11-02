@@ -346,13 +346,14 @@ func TestTrackerGivesTheClosesLineAndTheTitlesIssueID(t *testing.T) {
 func TestRoleReferencesAndClonesAreCheckedAtLoad(t *testing.T) {
 	setupHome(t)
 	for want, lines := range map[string][]string{
-		"has the role dev twice":                        {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "dev"`},
-		"has the alias d, which is a role's name":       {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "d"`, `aliases = ["d"]`},
-		"has the alias x twice":                         {`[[roles]]`, `name = "a"`, `aliases = ["x"]`, `[[roles]]`, `name = "b"`, `aliases = ["x"]`},
-		"has the alias X Y, use lowercase":              {`[[roles]]`, `name = "a"`, `aliases = ["X Y"]`},
-		"has the lead leed, which is none of its roles": {`lead = "leed"`, `[[roles]]`, `name = "lead"`},
-		"autostarts nobody, which is none of its roles": {`autostart = ["nobody"]`, `[[roles]]`, `name = "lead"`},
-		"has 2 roles and one clone for them all":        {`clone = "~/dev/{project}"`, `[[roles]]`, `name = "a"`, `[[roles]]`, `name = "b"`},
+		"has the role dev twice":                          {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "dev"`},
+		"has the alias d, which is a role's name":         {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "d"`, `aliases = ["d"]`},
+		"has the alias x twice":                           {`[[roles]]`, `name = "a"`, `aliases = ["x"]`, `[[roles]]`, `name = "b"`, `aliases = ["x"]`},
+		"has the alias X Y, use lowercase":                {`[[roles]]`, `name = "a"`, `aliases = ["X Y"]`},
+		"has the lead leed, which is none of its roles":   {`lead = "leed"`, `[[roles]]`, `name = "lead"`},
+		"autostarts nobody, which is none of its roles":   {`autostart = ["nobody"]`, `[[roles]]`, `name = "lead"`},
+		"has 2 roles and one clone for them all":          {`clone = "~/dev/{project}"`, `[[roles]]`, `name = "a"`, `[[roles]]`, `name = "b"`},
+		"has the clone dev/{role}, start it with ~/ or /": {`clone = "dev/{role}"`, `[[roles]]`, `name = "lead"`},
 	} {
 		addProject(t, "wrong", lines...)
 		if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), want) {
@@ -361,4 +362,39 @@ func TestRoleReferencesAndClonesAreCheckedAtLoad(t *testing.T) {
 	}
 	addProject(t, "one", `clone = "~/dev/one"`, `[[roles]]`, `name = "main"`)
 	mustLoad(t, "one")
+}
+
+func TestACloneEndingInASlashIsTheSameFolder(t *testing.T) {
+	home := setupHome(t)
+	addProject(t, "demo", `clone = "~/dev/{project}/{role}/"`, `[[roles]]`, `name = "lead"`)
+	p := mustLoad(t, "demo")
+	lead := filepath.Join(home, "dev", "demo", "lead")
+	if p.CloneDir("lead") != lead {
+		t.Fatal(p.CloneDir("lead"))
+	}
+	if role, ok := p.RoleOfDir(lead); !ok || role != "lead" {
+		t.Fatal(role, ok)
+	}
+	if role, ok := p.RoleOfDir(filepath.Join(lead, "src")); !ok || role != "lead" {
+		t.Fatal(role, ok)
+	}
+}
+
+func TestHoldsDirSeesAClonePastALink(t *testing.T) {
+	home := setupHome(t)
+	real := filepath.Join(filepath.Dir(home), "disk", "demo", "lead")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "dev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(filepath.Dir(home), "disk", "demo"), filepath.Join(home, "dev", "demo")); err != nil {
+		t.Fatal(err)
+	}
+	addProject(t, "demo", `[[roles]]`, `name = "lead"`)
+	p := mustLoad(t, "demo")
+	if !p.HoldsDir(real) || !p.HoldsDir(filepath.Join(home, "dev", "demo", "lead")) || p.HoldsDir(filepath.Join(filepath.Dir(home), "disk")) {
+		t.Fatal("holds")
+	}
 }

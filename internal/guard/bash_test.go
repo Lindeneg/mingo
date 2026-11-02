@@ -210,10 +210,36 @@ func TestBashAllowsUnparseableOrEmptyInput(t *testing.T) {
 	}
 }
 
+func TestBashDeniesSignallingEveryProcess(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"kill -9 -1",
+		"kill -KILL -1",
+		"kill -1 -1",
+		"kill -- -1",
+		"kill -9 -- -1",
+		"kill -s TERM -1",
+		"kill -n 9 -1",
+		"kill 1234 -1",
+		"/bin/kill -9 -1",
+		"sudo kill -9 -1",
+		"bash -c 'kill -9 -1'",
+		"true && kill -TERM -1",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"kill -1 1234",
+		"kill -HUP 1234",
+		"kill -1",
+		"kill -l",
+		"kill -9 -- -4321",
+		"kill -- -4321",
+	}}})
+}
+
 func TestBashNamesTheRuleItDeniesBy(t *testing.T) {
 	for _, c := range []struct{ command, reason string }{
 		{"powershell -EncodedCommand U3RvcC1Qcm9jZXNz", encodedReason},
 		{"pkill node", killReason},
+		{"kill -9 -1", everyReason},
 	} {
 		t.Run(c.command, func(t *testing.T) {
 			if got := denyReason(t, Bash(bashInput(t, "Bash", c.command))); got != c.reason {

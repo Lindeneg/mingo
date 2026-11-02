@@ -42,6 +42,24 @@ func TestNewWritesAConfigThatLoadsFromThePresetAndTheFlags(t *testing.T) {
 	}
 }
 
+func TestNewNamesTheReviewBotAsTheReviewerOnlyWithTheReviewModule(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	solo, err := k.New("demo", "solo", map[string][]string{"--repo": {"x/demo"}, "--ci-stack": {"go"}, "--workflow-checks": {"test"}, "--ci-run": {"test=go test ./..."}}, noTerminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(solo, "\nreviewer = \"claude[bot]\"\n") || project(t, solo).Workflow.Reviewer != "claude[bot]" {
+		t.Fatal(solo)
+	}
+	bare, err := k.New("demo", "bare", map[string][]string{"--repo": {"x/demo"}}, noTerminal)
+	if err != nil || strings.Contains(bare, "reviewer") {
+		t.Fatal(bare, err)
+	}
+}
+
 func TestNewAsksWhatTheFlagsLeaveOutAndSaysWhatItNeedsWithoutATerminal(t *testing.T) {
 	k, _ := LoadEmbedded()
 	var asked []string

@@ -32,8 +32,9 @@ type Check struct {
 }
 
 type Comment struct {
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
+	Author    string
+	Body      string
+	CreatedAt string
 }
 
 type PullRequest struct {
@@ -45,7 +46,7 @@ type PullRequest struct {
 	HeadRefOid        string    `json:"headRefOid"`
 	Body              string    `json:"body"`
 	Labels            []Named   `json:"labels"`
-	Comments          []Comment `json:"comments"`
+	Comments          []Comment `json:"-"`
 	StatusCheckRollup []Check   `json:"statusCheckRollup"`
 	Files             []Path    `json:"files"`
 	Commits           []Commit  `json:"commits"`
@@ -63,7 +64,7 @@ type Commit struct {
 	MessageBody string `json:"messageBody"`
 }
 
-var pullRequestFields = []string{"number", "title", "state", "isDraft", "baseRefName", "headRefOid", "body", "labels", "comments", "statusCheckRollup", "files", "commits"}
+var pullRequestFields = []string{"number", "title", "state", "isDraft", "baseRefName", "headRefOid", "body", "labels", "statusCheckRollup", "files", "commits"}
 
 type MergeFacts struct {
 	PullRequest       PullRequest
@@ -124,6 +125,9 @@ func findReviewProblem(w *config.Workflow, pr PullRequest) *reviewProblem {
 	var reviews []review
 	re := reviewLine(w)
 	for _, c := range pr.Comments {
+		if w.Reviewer != "" && c.Author != w.Reviewer {
+			continue
+		}
 		ls := lines(c.Body)
 		verdict := ""
 		if len(ls) > 1 {
@@ -135,7 +139,11 @@ func findReviewProblem(w *config.Workflow, pr PullRequest) *reviewProblem {
 	}
 	sort.SliceStable(reviews, func(i, j int) bool { return reviews[i].at < reviews[j].at })
 	if len(reviews) == 0 {
-		return &reviewProblem{message: "not reviewed: no comment begins with `" + w.ReviewLine + " <head sha>`"}
+		from := ""
+		if w.Reviewer != "" {
+			from = " from " + w.Reviewer
+		}
+		return &reviewProblem{message: "not reviewed: no comment" + from + " begins with `" + w.ReviewLine + " <head sha>`"}
 	}
 	newest := reviews[len(reviews)-1]
 	if newest.sha != pr.HeadRefOid {
@@ -393,6 +401,31 @@ func readFacts(d MergeDeps, number string) (MergeFacts, error) {
 	}
 	if err := parse(out, what, &f.PullRequest, pullRequestFields...); err != nil {
 		return f, err
+	}
+	// the REST answer names a bot as login[bot], which no user can be, where gh pr view drops the [bot]
+	what = "reading the comments"
+	out, err = gh(d, what, "api", "repos/{owner}/{repo}/issues/"+strconv.Itoa(f.PullRequest.Number)+"/comments", "--paginate", "--slurp")
+	if err != nil {
+		return f, err
+	}
+	var comments [][]struct {
+		User *struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := parse(out, what, &comments); err != nil {
+		return f, err
+	}
+	for _, page := range comments {
+		for _, c := range page {
+			author := ""
+			if c.User != nil {
+				author = c.User.Login
+			}
+			f.PullRequest.Comments = append(f.PullRequest.Comments, Comment{Author: author, Body: c.Body, CreatedAt: c.CreatedAt})
+		}
 	}
 	what = "reading the review threads"
 	out, err = gh(d, what, "api", "graphql", "--paginate", "--slurp",

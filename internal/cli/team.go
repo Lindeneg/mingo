@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -27,7 +28,11 @@ func teamProject() (*config.Project, string, error) {
 	if err != nil {
 		return nil, "", errors.New(config.Cwd() + " is in no git repository")
 	}
-	return p, strings.TrimSpace(string(out)), nil
+	root := strings.TrimSpace(string(out))
+	if !p.HoldsDir(root) {
+		return nil, "", fmt.Errorf("%s is none of %s's clones", root, p.Name)
+	}
+	return p, root, nil
 }
 
 func (e *env) pr(args []string) error {

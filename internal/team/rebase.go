@@ -343,9 +343,10 @@ func changedInWorktree(output string) []string {
 func (r *rebaser) replay(worktree, scratch string, regen *regenerated) (*resolvedFiles, *orderedSet, error) {
 	resolved, madeAgain := &resolvedFiles{}, &orderedSet{}
 	rebase := func(args ...string) (Result, error) {
-		var prefix []string
+		// a resolution git remembers would settle a conflict this command must see
+		prefix := []string{"-c", "rerere.enabled=false"}
 		if regen != nil {
-			prefix = []string{"-c", "core.attributesFile=" + regen.attributesFile}
+			prefix = append(prefix, "-c", "core.attributesFile="+regen.attributesFile)
 		}
 		return r.git(worktree, append(append(prefix, "rebase"), args...)...)
 	}

@@ -112,6 +112,39 @@ func TestInstallLeavesASettingsFileItCannotReadAsItIs(t *testing.T) {
 	}
 }
 
+func TestInstallLeavesASettingsFileWithAKeyOfAnotherTypeAsItIs(t *testing.T) {
+	h := newHome(t)
+	file := filepath.Join(h.home, ".claude", "settings.json")
+	for _, text := range []string{
+		`{"permissions": {"deny": "Read(./.env)"}}`,
+		`{"permissions": []}`,
+		`{"hooks": {"PreToolUse": {}}}`,
+		`{"hooks": "none"}`,
+	} {
+		h.write(file, text)
+		if r := h.mingo("install"); r.code == 0 || !strings.Contains(r.out, "left as it is") || h.read(file) != text {
+			t.Fatal(text, r.out)
+		}
+	}
+	h.write(file, `{"permissions": {"deny": "Read(./.env)"}}`)
+	if r := h.mingo("install"); !strings.Contains(r.out, file+" has a permissions.deny key that is not a JSON list, left as it is") {
+		t.Fatal(r.out)
+	}
+}
+
+func TestInstallKeepsTheModeOfTheSettingsFile(t *testing.T) {
+	h := newHome(t)
+	file := filepath.Join(h.home, ".claude", "settings.json")
+	h.write(file, `{"theme": "dark"}`)
+	if err := os.Chmod(file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.mingo("install")
+	if info, _ := os.Stat(file); info.Mode().Perm() != 0o600 || !strings.Contains(h.read(file), "isolatePeerMachines") {
+		t.Fatal(info.Mode(), h.read(file))
+	}
+}
+
 func TestServiceEnableInstallsTheUnitAndEnablesTheProjectsInstance(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("systemd is on linux alone")

@@ -50,9 +50,21 @@ func TestGateAndPrTakeTheProjectOfTheCloneTheyRunIn(t *testing.T) {
 func TestGateAndPrTakeMingoProjectOverTheFolder(t *testing.T) {
 	h := newHome(t)
 	lead := h.teamClone()
-	h.addProject("other", `[workflow]`, `base = "elsewhere"`, `[[roles]]`, `name = "lead"`)
+	h.addProject("other", `clone = "~/dev/demo/{role}"`, `[workflow]`, `base = "elsewhere"`, `[[roles]]`, `name = "lead"`)
 	if r := h.runIn(lead, []string{"MINGO_PROJECT=other"}, h.bin, "pr", "rebase", "elsewhere"); r.code != 1 || r.out != "elsewhere is never rebased\n" {
 		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestGateAndPrRefuseARepositoryThatIsNoneOfTheProjectsClones(t *testing.T) {
+	h := newHome(t)
+	lead := h.teamClone()
+	h.addProject("other", `[workflow]`, `base = "elsewhere"`, `[[roles]]`, `name = "lead"`)
+	for _, args := range [][]string{{"gate", "g.log"}, {"pr", "rebase", "elsewhere"}, {"pr", "merge", "1"}} {
+		r := h.runIn(lead, []string{"MINGO_PROJECT=other"}, h.bin, args...)
+		if r.code != 1 || r.out != "mingo: "+lead+" is none of other's clones\n" {
+			t.Fatal(args, r.code, r.out)
+		}
 	}
 }
 
@@ -163,5 +175,14 @@ func TestNewMakesAFullProjectAndASecondApplyChangesNothing(t *testing.T) {
 	}
 	if !strings.Contains(h.read(filepath.Join(state, "ruleset.json")), `"non_fast_forward"`) {
 		t.Fatal("no ruleset posted")
+	}
+}
+
+func TestNewTakesBackAConfigThatDoesNotLoad(t *testing.T) {
+	h := newHome(t)
+	file := filepath.Join(h.config, "projects", "demo.toml")
+	r := h.mingo("new", "demo", "--preset", "bare", "--repo", "x/demo", "--roles", "Lead")
+	if r.code == 0 || !strings.Contains(r.out, "has a role named Lead") || strings.Contains(r.out, "config: ") || exists(file) {
+		t.Fatal(r.code, r.out)
 	}
 }

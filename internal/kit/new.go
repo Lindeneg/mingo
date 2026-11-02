@@ -22,6 +22,9 @@ func (a Ask) Flag() string {
 
 var Presets = []string{"bare", "solo", "team", "full"}
 
+// the review workflow posts through the Claude GitHub app, whose comments come from this login
+const ReviewBot = "claude[bot]"
+
 func (k *Kit) Preset(name string) ([]string, error) {
 	switch name {
 	case "bare":
@@ -181,6 +184,9 @@ func (k *Kit) New(name, preset string, flags map[string][]string, prompt Prompt)
 			a.each[ask.Key] = append(a.each[ask.Key], [2]string{item, v})
 		}
 	}
+	if contains(modules, "review") {
+		a.values["workflow.reviewer"] = ReviewBot
+	}
 	roles := a.list("roles")
 	if preset == "solo" && len(roles) != 1 {
 		return "", fmt.Errorf("the solo preset has one role, not %d", len(roles))
@@ -247,7 +253,7 @@ func (a *answers) toml(name, preset string, modules []string) (string, error) {
 		name    string
 		entries []entry
 	}{
-		{"workflow", []entry{{"base", "workflow.base"}, {"checks", "workflow.checks"}, {"gate", "workflow.gate"}, {"tags", "workflow.tags"}}},
+		{"workflow", []entry{{"base", "workflow.base"}, {"checks", "workflow.checks"}, {"gate", "workflow.gate"}, {"tags", "workflow.tags"}, {"reviewer", "workflow.reviewer"}}},
 		{"ci", []entry{{"stack", "ci.stack"}}},
 		{"review", []entry{{"read", "review.read"}}},
 		{"tracker", []entry{{"kind", "tracker.kind"}, {"team", "tracker.team"}, {"project", "tracker.project"}}},

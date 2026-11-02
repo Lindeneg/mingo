@@ -562,6 +562,38 @@ func TestRebaseStopsOnAConflictOutsideTheListsWithTheFileNamedAndNothingPushed(t
 	r.expectClean("master")
 }
 
+func TestRebaseLeavesAConflictToTheAuthorEvenWhenGitRemembersAResolution(t *testing.T) {
+	r := setUpRepo(t, nil)
+	if err := os.WriteFile(os.Getenv("GIT_CONFIG_GLOBAL"), []byte("[rerere]\n\tenabled = true\n\tautoUpdate = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.commit("feature", map[string]string{appFile: entries("app", "feature")}, "feature")
+	r.commit("master", map[string]string{appFile: entries("app", "master")}, "master")
+	r.git(r.clone, "checkout", "--quiet", "feature")
+	merge := exec.Command("git", "merge", "--quiet", "master")
+	merge.Dir = r.clone
+	if merge.Run() == nil {
+		t.Fatal("the merge had no conflict")
+	}
+	if err := os.WriteFile(filepath.Join(r.clone, appFile), []byte(entries("app", "remembered")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(r.clone, "add", "--", appFile)
+	r.git(r.clone, "commit", "--quiet", "--no-edit")
+	r.git(r.clone, "reset", "--quiet", "--hard", "HEAD~1")
+	if cache, _ := os.ReadDir(filepath.Join(r.clone, ".git", "rr-cache")); len(cache) == 0 {
+		t.Fatal("git recorded no resolution")
+	}
+	before := r.remoteHead("feature")
+	if code := r.rebase("feature"); code != ExitFailed {
+		t.Fatal(code, r.printed())
+	}
+	equal(t, r.printed(), []string{"a conflict that is the author's to resolve; nothing was pushed:\n  " + appFile + ": not an append-only list"})
+	if r.remoteHead("feature") != before {
+		t.Fatal("pushed")
+	}
+}
+
 func TestRebaseStopsOnAListWhereBothSidesChangedALineThatWasThere(t *testing.T) {
 	r := setUpRepo(t, nil)
 	r.commit("feature", map[string]string{list: strings.Replace(listStart, "- one", "- one, by the feature", 1)}, "feature")

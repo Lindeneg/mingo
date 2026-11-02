@@ -54,11 +54,11 @@ func (e *env) project(action, name string) error {
 			_, err = e.out.Write(data)
 			return err
 		}
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
+		editor := strings.Fields(os.Getenv("EDITOR"))
+		if len(editor) == 0 {
+			editor = []string{"vi"}
 		}
-		cmd := exec.Command(editor, file)
+		cmd := exec.Command(editor[0], append(editor[1:], file)...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	default:

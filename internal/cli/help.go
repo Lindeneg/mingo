@@ -182,16 +182,16 @@ terminal what is pasted is not shown, and without one the token is read from std
 	"pr": `mingo pr merge <number>
 mingo pr rebase <branch>
 
-The lead's pull request commands, for the project of the clone they run in or of MINGO_PROJECT,
-with the values of its [workflow] and [tracker] tables. mingo help pr merge and mingo help pr rebase
-say more.
+The lead's pull request commands, run in one of the project's clones, with the values of its
+[workflow] and [tracker] tables. The project is MINGO_PROJECT's, or else the clone's. mingo help pr
+merge and mingo help pr rebase say more.
 `,
 	"pr merge": `mingo pr merge <number>
 
 Checks a ready pull request and squash merges it with its branch deleted, only when nothing holds
 it. It holds a pull request:
   with a required check of [workflow] checks that is not green on the head
-  with no review comment on the head that says no findings
+  with no review comment on the head that says no findings, from [workflow] reviewer when set
   with an unresolved thread, or a branch behind the base
   whose description does not begin with a tag of [workflow] tags, a blank line and the tracker's
   Closes line, or carries an attribution footer
@@ -247,10 +247,11 @@ The hooks Claude Code runs before a tool call, which mingo install writes into
 ~/.claude/settings.json. Each reads the call on stdin and prints a denial, or nothing.
 
   write   lets Edit, Write and NotebookEdit write only inside the session's project, the temp
-          folder and its memory and plan folders, by their real paths
+          folder outside mingo's state folder, and its memory and plan folders, by their real paths
   bash    denies a Bash or PowerShell command that ends a process by its name: pkill, killall,
           pgrep or pidof feeding a kill or a loop that kills, taskkill /IM, Stop-Process -Name
-          and their kin, also inside bash -c, eval and a command substitution
+          and their kin, also inside bash -c, eval and a command substitution. It also denies
+          kill -1, which ends every process.
 
 They are guards against slips, not a sandbox.
 `,

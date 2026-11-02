@@ -13,6 +13,7 @@ type WriteEnv struct {
 	ProjectDir string
 	TempDir    string
 	Home       string
+	StateDir   string
 }
 
 func WriteEnvFromOS() WriteEnv {
@@ -20,7 +21,7 @@ func WriteEnvFromOS() WriteEnv {
 	if tmp == "" {
 		tmp = "/tmp"
 	}
-	return WriteEnv{ProjectDir: os.Getenv("CLAUDE_PROJECT_DIR"), TempDir: tmp, Home: config.Home()}
+	return WriteEnv{ProjectDir: os.Getenv("CLAUDE_PROJECT_DIR"), TempDir: tmp, Home: config.Home(), StateDir: config.StateDir()}
 }
 
 func clean(path string) string {
@@ -82,10 +83,15 @@ func Write(input []byte, env WriteEnv) string {
 	}
 	file := resolve(clean(target))
 	root := clean(env.ProjectDir)
+	tmp := clean(env.TempDir)
+	// the state folder sits in the temp folder, and its markers and slots are every project's
+	if env.StateDir != "" && within(file, resolve(clean(env.StateDir))) && !within(file, resolve(root)) {
+		return deny("Write only inside your own project. " + target + " is in mingo's state folder, which only mingo writes.")
+	}
 	claudeHome := filepath.Join(env.Home, ".claude")
 	for _, allowed := range []string{
 		root,
-		clean(env.TempDir),
+		tmp,
 		filepath.Join(claudeHome, "projects", config.Slug(root)),
 		filepath.Join(claudeHome, "projects", config.Slug(resolve(root))),
 		filepath.Join(claudeHome, "plans"),

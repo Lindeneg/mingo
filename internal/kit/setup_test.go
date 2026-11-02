@@ -52,6 +52,9 @@ func TestPortsWritesTheEnvFromTheExampleOnceAndSaysWhenItCannot(t *testing.T) {
 	if string(env) != "A=1\nAPP_PORT_OFFSET=10\nB=2\n" || out.String() != "ports: "+dir+"/.env, APP_PORT_OFFSET=10\n" {
 		t.Fatal(string(env), out.String())
 	}
+	if info, err := os.Stat(filepath.Join(dir, ".env")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatal("the .env is not 0600", err)
+	}
 	os.Remove(filepath.Join(dir, ".env"))
 	os.WriteFile(filepath.Join(dir, ".env.example"), []byte("A=1\n"), 0o644)
 	if err := Ports(p, "lead", out); err == nil || !strings.Contains(err.Error(), "no empty APP_PORT_OFFSET line") {
@@ -101,12 +104,13 @@ func TestPlanSettingsSetsOnlyTheAttributionKey(t *testing.T) {
 		action Action
 		want   string
 	}{
-		"none":      {"", Add, off},
-		"others":    {"{\n  \"hooks\": {}\n}\n", Update, "{\n  \"hooks\": {},\n  \"attribution\": {\n    \"commit\": \"\",\n    \"pr\": \"\",\n    \"sessionUrl\": false\n  }\n}\n"},
-		"text":      {"{\"attribution\": {\"commit\": \"Co-Authored-By: x\"}}", Update, off},
-		"off":       {off, Same, off},
-		"false":     {"{\"attribution\": false}", Same, "{\"attribution\": false}"},
-		"blank set": {"{\"attribution\": {\"commit\": \"\", \"pr\": \"\"}}", Same, "{\"attribution\": {\"commit\": \"\", \"pr\": \"\"}}"},
+		"none":    {"", Add, off},
+		"others":  {"{\n  \"hooks\": {}\n}\n", Update, "{\n  \"hooks\": {},\n  \"attribution\": {\n    \"commit\": \"\",\n    \"pr\": \"\",\n    \"sessionUrl\": false\n  }\n}\n"},
+		"text":    {"{\"attribution\": {\"commit\": \"Co-Authored-By: x\"}}", Update, off},
+		"off":     {off, Same, off},
+		"false":   {"{\"attribution\": false}", Update, off},
+		"no link": {"{\"attribution\": {\"commit\": \"\", \"pr\": \"\"}}", Update, off},
+		"link on": {"{\"attribution\": {\"commit\": \"\", \"pr\": \"\", \"sessionUrl\": true}}", Update, off},
 	} {
 		files := map[string]string{}
 		if c.have != "" {

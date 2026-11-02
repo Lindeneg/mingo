@@ -190,6 +190,9 @@ func (p *Project) checkRoles() error {
 	if len(p.Roles) > 1 && !strings.Contains(p.Clone, "{role}") {
 		return fmt.Errorf("%s has %d roles and one clone for them all, put {role} in clone", p.File, len(p.Roles))
 	}
+	if !filepath.IsAbs(ExpandHome(p.Clone)) {
+		return fmt.Errorf("%s has the clone %s, start it with ~/ or /", p.File, p.Clone)
+	}
 	return nil
 }
 
@@ -323,7 +326,7 @@ func ExpandHome(path string) string {
 
 func (p *Project) CloneDir(role string) string {
 	dir := strings.ReplaceAll(ExpandHome(p.Clone), "{project}", p.Name)
-	return strings.ReplaceAll(dir, "{role}", role)
+	return filepath.Clean(strings.ReplaceAll(dir, "{role}", role))
 }
 
 // the clone as the config names it, with the home folder left as ~
@@ -391,6 +394,22 @@ func (p *Project) RoleOfDir(here string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// git names a repository by its real path, so a clone is compared through its links too
+func (p *Project) HoldsDir(dir string) bool {
+	real := func(path string) string {
+		if r, err := filepath.EvalSymlinks(path); err == nil {
+			return r
+		}
+		return path
+	}
+	for _, r := range p.Roles {
+		if clone := p.CloneDir(r.Name); inside(dir, clone) || inside(real(dir), real(clone)) {
+			return true
+		}
+	}
+	return false
 }
 
 func ProjectOfDir(here string) (string, bool) {

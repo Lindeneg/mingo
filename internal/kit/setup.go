@@ -140,7 +140,7 @@ func Ports(p *config.Project, role string, out io.Writer) error {
 		return fmt.Errorf("no empty %s line in %s/.env.example", p.Ports.Variable, dir)
 	}
 	draft := filepath.Join(dir, ".env.draft")
-	if err := os.WriteFile(draft, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+	if err := os.WriteFile(draft, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		return err
 	}
 	if err := os.Rename(draft, filepath.Join(dir, ".env")); err != nil {
@@ -219,16 +219,14 @@ func attributionOff() *ojson.Object {
 }
 
 func attributionIsOff(v any) bool {
-	if off, ok := v.(bool); ok {
-		return !off
-	}
 	o, ok := v.(*ojson.Object)
 	if !ok {
 		return false
 	}
 	commit, _ := o.Get("commit")
 	pr, _ := o.Get("pr")
-	return commit == "" && pr == ""
+	session, _ := o.Get("sessionUrl")
+	return commit == "" && pr == "" && session == false
 }
 
 // the project's settings are its own, so mingo only sets the attribution key in them
