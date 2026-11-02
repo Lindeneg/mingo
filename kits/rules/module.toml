@@ -1,0 +1,3 @@
+does = "the ruleset on the base branch: no deletion, no force push, pull requests with every thread resolved"
+setup = ["ruleset"]
+checks = ["ruleset"]

@@ -1,0 +1,15 @@
+name: setup
+description: Node from .node-version, pnpm from packageManager through corepack, the store cached, dependencies installed from the lockfile.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+      with:
+        cache: true
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .node-version
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"

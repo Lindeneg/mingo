@@ -1,0 +1,99 @@
+# a made-up project with every module, whose own passages are blocks
+
+repo = "acme/shop"
+title = "Acme"
+clone = "~/dev/acme/{role}"
+lead = "lead"
+modules = ["workflow", "ci", "review", "skills", "team", "tracker", "rules", "heavy", "ports"]
+
+[tracker]
+kind = "linear"
+team = "ACM"
+project = "Acme Shop"
+
+[workflow]
+base = "master"
+checks = ["check", "test", "build", "security"]
+gate = ["pnpm check", "pnpm test", "pnpm build"]
+tags = ["(lead)", "(dev)", "(design)"]
+
+[[workflow.shared]]
+name = "the route list"
+pattern = '^src/routes\.ts$'
+merge = "lines"
+
+[[workflow.shared]]
+name = "a catalog"
+pattern = '^locales/[^/]+\.json$'
+merge = "json-keys"
+
+[ci]
+stack = "pnpm"
+
+[heavy]
+scripts = ["check", "test", "build", "dev"]
+
+[ports]
+variable = "ACME_PORT_OFFSET"
+
+[ports.offsets]
+lead = 10
+dev = 20
+design = 30
+
+[review]
+read = "CLAUDE.md first, then the document under docs/ for the area the diff touches"
+categories = [
+  "correctness (a wrong result, a crash, a race, a swallowed error)",
+  "security (a secret in a log, a price trusted from the client)",
+  "a missing test for an edge case the issue or the change implies",
+]
+skip = "formatting, lint, naming or style"
+
+[[roles]]
+name = "lead"
+aliases = ["l"]
+does = "merges, hands out the issues and keeps the documents true"
+
+[[roles]]
+name = "dev"
+aliases = ["d"]
+does = "codes the issues labelled dev: the checkout, the catalog and the api"
+
+[[roles]]
+name = "design"
+does = "codes the issues labelled design: the pages, the styles and the copy"
+
+[blocks.".claude/skills/task-flow/SKILL.md"]
+checks = '''
+Run `pnpm check` and the tests of each package the change touches, on the head the pull request names. A change to the checkout also runs `pnpm test --filter checkout` whole.'''
+
+[blocks.".claude/skills/edge-cases/SKILL.md"]
+areas = '''
+## By area
+
+**Checkout**
+- A cart emptied in another tab; a price that changed since the cart was filled.
+- A payment that times out and then succeeds; the same order placed twice.
+
+'''
+
+[blocks."TEAM.md"]
+alone = '''
+The owner is away until the shop opens. Until then:
+
+1. Progress is the priority. Never stop to ask.
+2. A question the documents do not answer gets the simplest answer that keeps the documents' intent, written in the pull request as decided provisionally.'''
+
+[blocks.".github/workflows/ci.yml"]
+env = '''
+
+env:
+  ACME_TELEMETRY: "off"
+'''
+
+[blocks.".github/workflows/review.yml"]
+bots = '''
+          # Renovate's pull requests are reviewed like any other.
+          allowed_bots: "renovate[bot]"
+'''

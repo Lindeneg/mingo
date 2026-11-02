@@ -1,0 +1,20 @@
+does = "issue, branch, pull request, ready and merge with mingo pr merge, the ci-unavailable path, and the task-flow and lead skills"
+setup = ["labels"]
+checks = ["labels"]
+
+[[asks]]
+key = "workflow.base"
+question = "the base branch"
+default = "master"
+
+[[asks]]
+key = "workflow.gate"
+question = "the gate's commands"
+list = true
+default = ""
+
+[[asks]]
+key = "workflow.tags"
+question = "what a pull request description's first line may be"
+list = true
+default = ""

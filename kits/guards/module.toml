@@ -1,0 +1,2 @@
+does = "the write and kill guards in Claude Code's settings"
+checks = ["guards"]

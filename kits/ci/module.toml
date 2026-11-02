@@ -1,0 +1,18 @@
+does = "the checks of every pull request in .github/workflows/ci.yml, one job per check, and the setup action of the project's stack"
+
+[[asks]]
+key = "ci.stack"
+question = "the stack: pnpm, npm or go"
+default = "pnpm"
+
+[[asks]]
+key = "workflow.checks"
+question = "the checks every pull request runs"
+list = true
+default = "check, test, build, security"
+
+[[asks]]
+key = "ci.run"
+question = "the command of the check {item}"
+each = "check"
+when = "ci.stack=go"

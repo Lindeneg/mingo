@@ -1,0 +1,25 @@
+does = "roles, clones, the loop, clear, memory folders whose MEMORY.md points at the handoff, and no attribution in commits, pull requests or comments"
+always = true
+setup = ["memory"]
+checks = ["clones", "memory"]
+lines = ["No attribution footers in commits, pull requests or comments."]
+
+[[asks]]
+key = "repo"
+question = "the GitHub repository, as owner/name"
+
+[[asks]]
+key = "title"
+question = "the name the texts call the project"
+default = "{name}"
+
+[[asks]]
+key = "roles"
+question = "the roles, in the order they start"
+list = true
+default = "lead"
+
+[[asks]]
+key = "lead"
+question = "the role that merges"
+default = "{first role}"

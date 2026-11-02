@@ -1,0 +1,13 @@
+does = "each role's port offset written into its clone's .env from .env.example"
+setup = ["ports"]
+checks = ["ports"]
+
+[[asks]]
+key = "ports.variable"
+question = "the empty line of .env.example that gets each role's port offset"
+
+[[asks]]
+key = "ports.offsets"
+question = "the port offset of {item}"
+each = "role"
+default = "{offset}"

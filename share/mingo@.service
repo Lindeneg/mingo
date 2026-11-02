@@ -1,0 +1,17 @@
+[Unit]
+Description=mingo sessions of %i
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# a user unit cannot wait for the system's network, so it waits up to two minutes for name resolution
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do getent hosts api.anthropic.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+ExecStart=%h/.local/bin/mingo start --autostart %i
+ExecStop=%h/.local/bin/mingo stop %i
+# the tmux server may have started under this unit and every project's sessions live in it, so a stop ends only this project's, through ExecStop
+KillMode=process
+TimeoutStopSec=150
+
+[Install]
+WantedBy=default.target

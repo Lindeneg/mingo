@@ -1,0 +1,35 @@
+[[- if eq .CI.Stack "pnpm"]]name: setup
+description: Node from .node-version, pnpm from packageManager through corepack, the store cached, dependencies installed from the lockfile.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+      with:
+        cache: true
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .node-version
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+[[else if eq .CI.Stack "npm"]]name: setup
+description: Node from .node-version, the npm cache, dependencies installed from the lockfile.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .node-version
+        cache: npm
+    - run: npm ci
+      shell: bash
+[[else if eq .CI.Stack "go"]]name: setup
+description: Go from go.mod, with the module and build caches.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+[[end]]

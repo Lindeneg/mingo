@@ -1,0 +1,59 @@
+[[- if .CI.Stack]][[block "header" .]]# The checks of every pull request, one job per check. mingo pr merge asks each of
+# them to be green on the pull request's head.
+[[end]]name: [[.Workflow.CI]]
+
+on:
+  pull_request:
+[[block "dispatch" .]]  # By hand, for a run on the base after Actions comes back from an outage.
+[[end]]  workflow_dispatch:
+
+concurrency:
+  group: [[.Workflow.CI]]-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+[[block "env" .]][[end]]
+jobs:
+[[- block "jobs" .]][[range $i, $check := .Workflow.Checks]][[if $i]]
+[[end]][[if eq $check "security"]]
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # gitleaks lists the pull request's commits through the API.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks scans the history of the pull request's commits.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Dependency audit
+[[- if eq $.CI.Stack "go"]]
+        # Fails on a known vulnerability the code reaches.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+[[- else]]
+        # Fails on a known vulnerability of high or critical severity.
+        run: [[if eq $.CI.Stack "pnpm"]]pnpm audit --audit-level high[[else]]npm audit --audit-level=high[[end]]
+[[- end]]
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The log and the job summary carry the findings; no comment on the pull request.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Semgrep, community rules
+        # The pinned container, the community ruleset, no metrics; any finding fails.
+        run: docker run --rm -v "$PWD:/src" semgrep/semgrep:1.180.0 semgrep scan --config p/default --error --metrics=off
+[[- else]]
+  [[$check]]:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: [[$.CI.Command $check]]
+[[- end]][[end]]
+[[end]][[end]]

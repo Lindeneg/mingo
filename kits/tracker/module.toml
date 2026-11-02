@@ -1,0 +1,19 @@
+does = "Linear, GitHub Issues or none as the tracker, the plan-milestone skill, and on GitHub the role labels"
+setup = ["labels"]
+checks = ["labels", "linear"]
+
+[[asks]]
+key = "tracker.kind"
+question = "the tracker: linear, github or none"
+default = "github"
+
+[[asks]]
+key = "tracker.team"
+question = "the Linear team's key"
+when = "tracker.kind=linear"
+
+[[asks]]
+key = "tracker.project"
+question = "the Linear project"
+default = "{title}"
+when = "tracker.kind=linear"

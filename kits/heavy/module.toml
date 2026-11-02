@@ -1,0 +1,7 @@
+does = "the slots shim for Node projects in tools/heavy.mjs, and the package.json scripts it wraps"
+
+[[asks]]
+key = "heavy.scripts"
+question = "the package.json scripts that take a slot"
+list = true
+default = "check, test, build, dev"

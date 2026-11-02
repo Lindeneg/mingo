@@ -1,0 +1,17 @@
+# mingo project {name}. {project} and {role} are filled in, ~/ is the home folder.
+
+repo = ""
+clone = "~/dev/{project}/{role}"
+lead = "lead"
+opener = "Read your handoff memory, then continue."
+autostart = []
+
+# id = ""
+# claude_args = ["--permission-mode", "auto", "--remote-control"]
+
+[[roles]]
+name = "lead"
+aliases = []
+model = ""
+effort = ""
+does = ""
