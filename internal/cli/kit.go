@@ -40,6 +40,24 @@ func (e *env) apply(name string) error {
 	return kit.Apply(d)
 }
 
+func (e *env) claude(action, name string) error {
+	if action != "edit" || name == "" {
+		return errors.New("claude edit <project>")
+	}
+	p, err := config.Find(name)
+	if err != nil {
+		return err
+	}
+	if !p.ClaudeLocal() {
+		return fmt.Errorf("%s has claude_files repo, so its CLAUDE.md is in its repository", p.Name)
+	}
+	file := config.ClaudeFile(p.Name)
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return edit(file)
+}
+
 func (e *env) doctor(name string) error {
 	d, err := e.kitDeps(name)
 	if err != nil {

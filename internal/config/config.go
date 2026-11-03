@@ -57,6 +57,11 @@ func File(name string) string {
 	return filepath.Join(Dir(), "projects", name+".toml")
 }
 
+// with claude_files local the project's CLAUDE.md is kept here, out of every repository
+func ClaudeFile(name string) string {
+	return filepath.Join(Dir(), "projects", name, "CLAUDE.md")
+}
+
 func exists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()

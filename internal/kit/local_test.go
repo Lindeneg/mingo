@@ -158,7 +158,7 @@ func TestDoctorWithLocalClaudeFilesReadsEveryClone(t *testing.T) {
 	for _, line := range []string{
 		"    in place: tools/run.sh\n",
 		"  Claude's files in chief's clone\n    in place: Claude's files out of git in .git/info/exclude\n",
-		"    in place: TEAM.md\n", "    in place: mingo's lines in CLAUDE.md\n",
+		"    in place: TEAM.md\n", "    in place: CLAUDE.md\n",
 		"  Claude's files in helper's clone\n    missing: /CLAUDE.md /TEAM.md /.claude/ in .git/info/exclude (mingo apply demo)\n",
 		"    missing: TEAM.md (mingo apply demo)\n",
 	} {
@@ -168,5 +168,25 @@ func TestDoctorWithLocalClaudeFilesReadsEveryClone(t *testing.T) {
 	}
 	if missing != 2 {
 		t.Fatal(missing, out)
+	}
+}
+
+func TestApplyWithLocalClaudeFilesWritesTheProjectsOwnTextIntoEveryClonesCLAUDEmd(t *testing.T) {
+	w := localWorld(t)
+	w.claude = "# demo\n\nOur rules.\n"
+	w.apply()
+	for _, dir := range []string{w.lead, w.helper()} {
+		if got := read(t, filepath.Join(dir, "CLAUDE.md")); got != "# demo\n\nOur rules.\n\nNo attribution.\n@TEAM.md\n" {
+			t.Fatal(dir, got)
+		}
+	}
+	w.merge()
+	w.claude = "# demo\n\nOur new rules.\n@TEAM.md\n"
+	out := w.apply()
+	if !strings.Contains(out, "chief: updates CLAUDE.md\n") || !strings.Contains(out, "helper: updates CLAUDE.md\n") {
+		t.Fatal(out)
+	}
+	if got := read(t, filepath.Join(w.helper(), "CLAUDE.md")); got != "# demo\n\nOur new rules.\n@TEAM.md\n\nNo attribution.\n" {
+		t.Fatal(got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Lindeneg/mingo/internal/config"
 )
 
 // Claude's files are CLAUDE.md, the files it imports and what is under .claude
@@ -21,11 +23,13 @@ func claudeFile(mods []Module, path string) bool {
 	return false
 }
 
-// the files for the repository, and with claude_files local the ones for every clone
-func (d Deps) split(mods []Module, files []File) (repo, clone []File) {
+// the files for the repository, and with claude_files local the ones for every clone,
+// CLAUDE.md first, the project's own text with mingo's lines below it
+func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
 	if !d.Project.ClaudeLocal() {
-		return files, nil
+		return files, nil, nil
 	}
+	var repo, clone []File
 	for _, f := range files {
 		if claudeFile(mods, f.Path) {
 			clone = append(clone, f)
@@ -33,20 +37,35 @@ func (d Deps) split(mods []Module, files []File) (repo, clone []File) {
 			repo = append(repo, f)
 		}
 	}
-	return repo, clone
+	own, err := os.ReadFile(config.ClaudeFile(d.Project.Name))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+	text := string(own)
+	var missing []string
+	lines, _ := mingoLines(mods)
+	for _, line := range lines {
+		if !hasLine(text, line) {
+			missing = append(missing, line)
+		}
+	}
+	if len(missing) > 0 {
+		if text != "" {
+			text = strings.TrimSuffix(text, "\n") + "\n\n"
+		}
+		text += strings.Join(missing, "\n") + "\n"
+	}
+	if text != "" {
+		clone = append([]File{{Path: Instructions, Module: "sessions", Text: text}}, clone...)
+	}
+	return repo, clone, nil
 }
 
-// every path of Claude's that mingo writes
-func claudePaths(mods []Module, files []File) []string {
+// every path of Claude's that mingo writes into a clone
+func claudePaths(files []File) []string {
 	var paths []string
 	for _, f := range files {
 		paths = append(paths, f.Path)
-	}
-	for _, m := range mods {
-		if len(m.Imports)+len(m.Lines) > 0 {
-			paths = append(paths, Instructions)
-			break
-		}
 	}
 	return append(paths, Settings)
 }
@@ -61,10 +80,9 @@ func excludes(mods []Module) []string {
 	return append(lines, "/.claude/")
 }
 
-func planClaude(mods []Module, files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
-	steps := append(Plan(files, read, lock), PlanImports(mods, read)...)
+func planClaude(files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
 	settings, err := PlanSettings(read)
-	return append(steps, settings...), err
+	return append(Plan(files, read, lock), settings...), err
 }
 
 type clone struct {
@@ -183,7 +201,7 @@ func (d Deps) applyClones(mods []Module, files []File, clones []clone, scratch s
 		if err != nil {
 			return false, err
 		}
-		steps, err := planClaude(mods, files, c.read, lock)
+		steps, err := planClaude(files, c.read, lock)
 		if err != nil {
 			return false, fmt.Errorf("in %s's clone, %v", c.role, err)
 		}

@@ -226,6 +226,20 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 	if r := h.mingo("apply", "demo"); r.code != 0 || !strings.HasSuffix(r.out, "nothing to apply\n") {
 		t.Fatal(r.out)
 	}
+	h.fakeTool("fake-editor", `printf '# demo rules\n' >"$1"`)
+	if r := h.runIn(h.root, []string{"EDITOR=fake-editor"}, h.bin, "claude", "edit", "demo"); r.code != 0 {
+		t.Fatal(r.out)
+	}
+	if r := h.mingo("apply", "demo"); !strings.Contains(r.out, "lead: updates CLAUDE.md\n") || !strings.Contains(r.out, "dev: updates CLAUDE.md\n") {
+		t.Fatal(r.out)
+	}
+	if got := h.read(filepath.Join(h.home, "dev", "demo", "dev", "CLAUDE.md")); got != "# demo rules\n\nNo attribution footers in commits, pull requests or comments.\n@TEAM.md\n" {
+		t.Fatal(got)
+	}
+	h.addProject("kept", `[[roles]]`, `name = "lead"`)
+	if r := h.mingo("claude", "edit", "kept"); r.code != 1 || !strings.Contains(r.out, "kept has claude_files repo, so its CLAUDE.md is in its repository") {
+		t.Fatal(r.code, r.out)
+	}
 	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  Claude's files in dev's clone\n    in place: Claude's files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
 		t.Fatal(r.out)
 	}

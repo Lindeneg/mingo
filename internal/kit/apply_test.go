@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -35,6 +36,7 @@ type world struct {
 	openPR string
 	before func(args []string)
 	config string
+	claude string
 }
 
 func newWorld(t *testing.T, empty bool) *world {
@@ -85,6 +87,10 @@ func (w *world) try() error {
 		text = "repo = \"x/demo\"\nmodules = [\"skills\"]\n[[roles]]\nname = \"chief\"\n[[roles]]\nname = \"helper\"\n"
 	}
 	p := project(w.t, text)
+	if w.claude != "" {
+		os.MkdirAll(filepath.Dir(config.ClaudeFile(p.Name)), 0o755)
+		os.WriteFile(config.ClaudeFile(p.Name), []byte(w.claude), 0o644)
+	}
 	run := func(o team.Options, name string, args ...string) (team.Result, error) {
 		if name == "git" && w.before != nil {
 			w.before(args)

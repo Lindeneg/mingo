@@ -253,7 +253,10 @@ func Doctor(d Deps) (int, error) {
 	}
 	missing += d.report(steps)
 	if p.ClaudeLocal() {
-		_, local := d.split(mods, files)
+		_, local, err := d.split(mods, files)
+		if err != nil {
+			return 0, err
+		}
 		for _, role := range p.RoleNames() {
 			c, err := d.clone(role)
 			if err != nil {
@@ -274,7 +277,7 @@ func Doctor(d Deps) (int, error) {
 			if err != nil {
 				return 0, err
 			}
-			steps, err := planClaude(mods, local, c.read, lock)
+			steps, err := planClaude(local, c.read, lock)
 			if err != nil {
 				return 0, fmt.Errorf("in %s's clone, %v", role, err)
 			}

@@ -222,7 +222,10 @@ func Apply(d Deps) error {
 	if err != nil {
 		return err
 	}
-	_, local := d.split(mods, files)
+	_, local, err := d.split(mods, files)
+	if err != nil {
+		return err
+	}
 	wrote, err := d.applyClones(mods, local, clones, scratch)
 	if err != nil {
 		return err
@@ -366,8 +369,11 @@ func (d Deps) pullRequest(dir, subject string, steps []Step) error {
 
 func (d Deps) plan(mods []Module, files []File, co *checkout, lock *Lock) ([]Step, error) {
 	if d.Project.ClaudeLocal() {
-		repo, local := d.split(mods, files)
-		for _, path := range claudePaths(mods, local) {
+		repo, local, err := d.split(mods, files)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range claudePaths(local) {
 			if _, ok := co.read(path); ok {
 				return nil, fmt.Errorf("claude_files is local, so Claude's files stay out of the repository, and %s has %s, take it out first", d.Project.Repo, path)
 			}

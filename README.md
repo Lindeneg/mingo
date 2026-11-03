@@ -41,6 +41,7 @@ left out inside a project's clone, with MINGO_PROJECT set, or with a default pro
   mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
   mingo apply <project>                 land the files of the project's modules through a pull request
   mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
   mingo secret review <project>         set the review's token from what claude setup-token printed
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
   mingo install                         the command, tmux and Claude settings
@@ -98,8 +99,6 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 | rules | a ruleset on the base branch |
 | heavy | `tools/heavy.mjs`, which puts a Node project's heavy scripts behind the slots |
 | ports | a port offset per role in each clone's `.env` |
-
-With `claude_files = "local"`, Claude's files stay out of the repository, for one that is public: `mingo apply` writes `CLAUDE.md`, the files it imports and `.claude` into every clone, and each clone's `.git/info/exclude` keeps them out of git. Claude Code also reads a `CLAUDE.md` in the folders above a clone, so the project's own instructions can sit once in `~/dev/<project>/CLAUDE.md`.
 
 The guards catch mistakes, not a session that means to get round them.
 
