@@ -83,25 +83,26 @@ type Role struct {
 }
 
 type Project struct {
-	Name       string                       `toml:"-"`
-	File       string                       `toml:"-"`
-	ID         string                       `toml:"id"`
-	Title      string                       `toml:"title"`
-	Repo       string                       `toml:"repo"`
-	Clone      string                       `toml:"clone"`
-	Lead       string                       `toml:"lead"`
-	Opener     string                       `toml:"opener"`
-	Autostart  []string                     `toml:"autostart"`
-	ClaudeArgs []string                     `toml:"claude_args"`
-	Roles      []Role                       `toml:"roles"`
-	Workflow   Workflow                     `toml:"workflow"`
-	Tracker    Tracker                      `toml:"tracker"`
-	CI         CI                           `toml:"ci"`
-	Review     Review                       `toml:"review"`
-	Ports      Ports                        `toml:"ports"`
-	Heavy      Heavy                        `toml:"heavy"`
-	Modules    []string                     `toml:"modules"`
-	Blocks     map[string]map[string]string `toml:"blocks"`
+	Name        string                       `toml:"-"`
+	File        string                       `toml:"-"`
+	ID          string                       `toml:"id"`
+	Title       string                       `toml:"title"`
+	Repo        string                       `toml:"repo"`
+	Clone       string                       `toml:"clone"`
+	Lead        string                       `toml:"lead"`
+	Opener      string                       `toml:"opener"`
+	Autostart   []string                     `toml:"autostart"`
+	ClaudeArgs  []string                     `toml:"claude_args"`
+	ClaudeFiles string                       `toml:"claude_files"`
+	Roles       []Role                       `toml:"roles"`
+	Workflow    Workflow                     `toml:"workflow"`
+	Tracker     Tracker                      `toml:"tracker"`
+	CI          CI                           `toml:"ci"`
+	Review      Review                       `toml:"review"`
+	Ports       Ports                        `toml:"ports"`
+	Heavy       Heavy                        `toml:"heavy"`
+	Modules     []string                     `toml:"modules"`
+	Blocks      map[string]map[string]string `toml:"blocks"`
 }
 
 func Load(name string) (*Project, error) {
@@ -130,6 +131,13 @@ func Load(name string) (*Project, error) {
 	}
 	if !md.IsDefined("claude_args") {
 		p.ClaudeArgs = append([]string(nil), DefaultClaudeArgs...)
+	}
+	switch p.ClaudeFiles {
+	case "":
+		p.ClaudeFiles = "repo"
+	case "repo", "local":
+	default:
+		return nil, fmt.Errorf("%s has claude_files %s, use repo or local", file, p.ClaudeFiles)
 	}
 	if len(p.Roles) == 0 {
 		return nil, fmt.Errorf("%s names no roles", file)
@@ -251,6 +259,19 @@ func Find(nameOrID string) (*Project, error) {
 func Known(nameOrID string) bool {
 	_, ok := NameOf(nameOrID)
 	return ok
+}
+
+// CLAUDE.md, the files it imports and .claude live in each clone and out of git
+func (p *Project) ClaudeLocal() bool {
+	return p.ClaudeFiles == "local"
+}
+
+// the review on GitHub sees only what the repository has
+func DefaultRead(claudeFiles string) string {
+	if claudeFiles == "local" {
+		return "README.md first"
+	}
+	return "CLAUDE.md first"
 }
 
 func (p *Project) RoleNames() []string {

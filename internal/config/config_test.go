@@ -329,6 +329,26 @@ func TestWorkflowAndTrackerMistakesAreRefused(t *testing.T) {
 	}
 }
 
+func TestClaudeFilesAreInTheRepoUnlessLocalAndALocalProjectsReviewReadsTheReadme(t *testing.T) {
+	setupHome(t)
+	addProject(t, "kept", `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "kept"); p.ClaudeFiles != "repo" || p.ClaudeLocal() || p.Review.Read != "CLAUDE.md first" {
+		t.Fatal(p.ClaudeFiles, p.Review.Read)
+	}
+	addProject(t, "own", `claude_files = "local"`, `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "own"); !p.ClaudeLocal() || p.Review.Read != "README.md first" {
+		t.Fatal(p.ClaudeFiles, p.Review.Read)
+	}
+	addProject(t, "set", `claude_files = "local"`, `[review]`, `read = "docs/ first"`, `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "set"); p.Review.Read != "docs/ first" {
+		t.Fatal(p.Review.Read)
+	}
+	addProject(t, "wrong", `claude_files = "home"`, `[[roles]]`, `name = "lead"`)
+	if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), "has claude_files home, use repo or local") {
+		t.Fatal(err)
+	}
+}
+
 func TestTrackerGivesTheClosesLineAndTheTitlesIssueID(t *testing.T) {
 	setupHome(t)
 	addProject(t, "lin", `[tracker]`, `kind = "linear"`, `team = "ACM"`, `[[roles]]`, `name = "lead"`)

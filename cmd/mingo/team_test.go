@@ -178,6 +178,59 @@ func TestNewMakesAFullProjectAndASecondApplyChangesNothing(t *testing.T) {
 	}
 }
 
+func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *testing.T) {
+	h := newHome(t)
+	h.write(filepath.Join(h.home, ".gitconfig"), "[user]\n\tname = Kit Test\n\temail = kit@example.test\n[commit]\n\tgpgsign = false\n")
+	origin := filepath.Join(h.root, "origin.git")
+	seed := filepath.Join(h.root, "seed")
+	h.gitIn(h.root, "init", "--quiet", "--bare", "--initial-branch=master", origin)
+	h.gitIn(h.root, "init", "--quiet", "--initial-branch=master", seed)
+	h.write(filepath.Join(seed, "package.json"), "{\n  \"name\": \"demo\",\n  \"scripts\": {\n    \"check\": \"tsc\",\n    \"test\": \"vitest\",\n    \"build\": \"vite build\",\n    \"dev\": \"vite\"\n  }\n}\n")
+	h.write(filepath.Join(seed, "README.md"), "# demo\n")
+	h.runIn(seed, nil, "git", "add", "-A")
+	h.runIn(seed, nil, "git", "commit", "--quiet", "-m", "start")
+	h.runIn(seed, nil, "git", "push", "--quiet", origin, "master")
+	h.fakeGitHub(origin)
+
+	r := h.mingo("new", "demo", "--preset", "team", "--repo", "x/demo", "--roles", "lead,dev", "--tracker-kind", "github", "--claude-files", "local")
+	if r.code != 0 {
+		t.Fatal(r.out)
+	}
+	for _, line := range []string{
+		"adds .github/workflows/ci.yml", "updates package.json", "opened https://github.com/x/demo/pull/1",
+		"lead: adds /CLAUDE.md /TEAM.md /.claude/ to .git/info/exclude", "lead: adds CLAUDE.md", "lead: adds TEAM.md",
+		"dev: adds .claude/skills/task-flow/SKILL.md", "dev: adds .claude/settings.json",
+	} {
+		if !strings.Contains(r.out, line+"\n") {
+			t.Fatal(line, "\n", r.out)
+		}
+	}
+	for _, path := range []string{"CLAUDE.md", "TEAM.md", ".claude/settings.json", ".claude/skills/task-flow/SKILL.md"} {
+		if h.runIn(origin, nil, "git", "cat-file", "-e", "mingo-kit:"+path).code == 0 {
+			t.Fatal(path, "is in the pull request")
+		}
+	}
+	if review := h.runIn(origin, nil, "git", "show", "mingo-kit:.github/workflows/review.yml").out; !strings.Contains(review, "Read README.md first.") {
+		t.Fatal(review)
+	}
+	for _, role := range []string{"lead", "dev"} {
+		clone := filepath.Join(h.home, "dev", "demo", role)
+		if h.read(filepath.Join(clone, "CLAUDE.md")) != "No attribution footers in commits, pull requests or comments.\n@TEAM.md\n" || !exists(filepath.Join(clone, "TEAM.md")) {
+			t.Fatal(role, h.read(filepath.Join(clone, "CLAUDE.md")))
+		}
+		if status := h.runIn(clone, nil, "git", "status", "--porcelain").out; status != "" {
+			t.Fatal(role, status)
+		}
+	}
+	h.gitIn(origin, "update-ref", "refs/heads/master", "refs/heads/mingo-kit")
+	if r := h.mingo("apply", "demo"); r.code != 0 || !strings.HasSuffix(r.out, "nothing to apply\n") {
+		t.Fatal(r.out)
+	}
+	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  Claude's files in dev's clone\n    in place: Claude's files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
+		t.Fatal(r.out)
+	}
+}
+
 func TestNewTakesBackAConfigThatDoesNotLoad(t *testing.T) {
 	h := newHome(t)
 	file := filepath.Join(h.config, "projects", "demo.toml")

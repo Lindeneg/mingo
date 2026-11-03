@@ -34,6 +34,7 @@ type world struct {
 	fsys   fstest.MapFS
 	openPR string
 	before func(args []string)
+	config string
 }
 
 func newWorld(t *testing.T, empty bool) *world {
@@ -67,11 +68,23 @@ func newWorld(t *testing.T, empty bool) *world {
 
 func (w *world) apply() string {
 	w.t.Helper()
+	if err := w.try(); err != nil {
+		w.t.Fatal(err)
+	}
+	return w.out.String()
+}
+
+func (w *world) try() error {
+	w.t.Helper()
 	k, err := Load(w.fsys)
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	p := project(w.t, "repo = \"x/demo\"\nmodules = [\"skills\"]\n[[roles]]\nname = \"chief\"\n[[roles]]\nname = \"helper\"\n")
+	text := w.config
+	if text == "" {
+		text = "repo = \"x/demo\"\nmodules = [\"skills\"]\n[[roles]]\nname = \"chief\"\n[[roles]]\nname = \"helper\"\n"
+	}
+	p := project(w.t, text)
 	run := func(o team.Options, name string, args ...string) (team.Result, error) {
 		if name == "git" && w.before != nil {
 			w.before(args)
@@ -90,10 +103,7 @@ func (w *world) apply() string {
 	}
 	w.out.Reset()
 	w.deps = Deps{Kit: k, Project: p, Run: run, Out: w.out, TempRoot: w.t.TempDir(), Version: "v1", Home: w.home}
-	if err := Apply(w.deps); err != nil {
-		w.t.Fatal(err)
-	}
-	return w.out.String()
+	return Apply(w.deps)
 }
 
 func (w *world) show(ref, path string) string {

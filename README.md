@@ -99,6 +99,8 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 | heavy | `tools/heavy.mjs`, which puts a Node project's heavy scripts behind the slots |
 | ports | a port offset per role in each clone's `.env` |
 
+With `claude_files = "local"`, Claude's files stay out of the repository, for one that is public: `mingo apply` writes `CLAUDE.md`, the files it imports and `.claude` into every clone, and each clone's `.git/info/exclude` keeps them out of git. Claude Code also reads a `CLAUDE.md` in the folders above a clone, so the project's own instructions can sit once in `~/dev/<project>/CLAUDE.md`.
+
 The guards catch mistakes, not a session that means to get round them.
 
 ## A new server
@@ -124,6 +126,7 @@ lead = "lead"                      # the first role by default
 opener = "You are the {role}. Read your handoff memory, then continue."
 autostart = ["lead"]               # what mingo service starts at boot
 claude_args = ["--permission-mode", "auto", "--remote-control"]
+claude_files = "repo"              # or local: CLAUDE.md, what it imports and .claude in each clone, out of git
 modules = ["workflow", "ci", "review", "team", "tracker"]   # sessions is always on
 
 [[roles]]
@@ -170,7 +173,7 @@ stack = "pnpm"                     # pnpm, npm or go
 check = "pnpm check"               # pnpm <check> or npm run <check> by default
 
 [review]
-read = "CLAUDE.md first"
+read = "CLAUDE.md first"           # README.md first when claude_files is local
 categories = ["correctness (a wrong result, a crash)", "a missing test for an edge case"]
 skip = "formatting, lint or style"
 

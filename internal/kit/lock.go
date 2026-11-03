@@ -22,12 +22,16 @@ type Lock struct {
 }
 
 func ParseLock(data []byte) (*Lock, error) {
+	return parseLock(data, LockPath)
+}
+
+func parseLock(data []byte, name string) (*Lock, error) {
 	l := &Lock{}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return l, nil
 	}
 	if _, err := toml.Decode(string(data), l); err != nil {
-		return nil, fmt.Errorf("%s: %v", LockPath, err)
+		return nil, fmt.Errorf("%s: %v", name, err)
 	}
 	return l, nil
 }

@@ -105,3 +105,29 @@ func TestNewWritesStringsTOMLReadsBack(t *testing.T) {
 		t.Fatalf("%q\n%s", p.Title, text)
 	}
 }
+
+func TestNewKeepsClaudesFilesLocalWhenAskedAndTheReviewThenReadsTheReadme(t *testing.T) {
+	k, _ := LoadEmbedded()
+	var asked []string
+	prompt := func(q, def string) (string, bool) {
+		asked = append(asked, q+" ["+def+"]")
+		switch q {
+		case "the GitHub repository, as owner/name":
+			return "x/demo", true
+		case "where Claude's files go: repo, or local to each clone and out of git":
+			return "local", true
+		}
+		return "", true
+	}
+	text, err := k.New("demo", "solo", nil, prompt)
+	if err != nil || !strings.Contains(text, "\nclaude_files = \"local\"\n") || !strings.Contains(text, "\nread = \"README.md first\"\n") {
+		t.Fatal(text, err)
+	}
+	if !strings.Contains(strings.Join(asked, "\n"), "what the review reads first [README.md first]") || !project(t, text).ClaudeLocal() {
+		t.Fatal(asked)
+	}
+	kept, err := k.New("demo", "solo", map[string][]string{"--repo": {"x/demo"}, "--claude-files": {"repo"}}, noTerminal)
+	if err != nil || strings.Contains(kept, "claude_files") || !strings.Contains(kept, "\nread = \"CLAUDE.md first\"\n") {
+		t.Fatal(kept, err)
+	}
+}
