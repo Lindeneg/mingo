@@ -43,6 +43,7 @@ left out inside a project's clone, with MINGO_PROJECT set, or with a default pro
   mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
   mingo apply <project>                 land the files of the project's modules through a pull request
   mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
   mingo secret review <project>         set the review's token from what claude setup-token printed
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
   mingo install                         the command, tmux and Claude settings
@@ -73,7 +74,7 @@ func isHelp(arg string) bool {
 	return arg == "--help" || arg == "-h"
 }
 
-var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true}
+var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
 
 type exitError int
 
@@ -182,6 +183,8 @@ func (e *env) dispatch(args []string) error {
 		return e.apply(arg(0))
 	case "doctor":
 		return e.doctor(arg(0))
+	case "claude":
+		return e.claude(arg(0), arg(1))
 	case "secret":
 		return e.secret(args)
 	case "version":

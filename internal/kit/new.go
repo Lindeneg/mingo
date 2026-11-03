@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Lindeneg/mingo/internal/config"
 )
 
 type Ask struct {
@@ -17,7 +19,7 @@ type Ask struct {
 }
 
 func (a Ask) Flag() string {
-	return "--" + strings.ReplaceAll(a.Key, ".", "-")
+	return "--" + strings.NewReplacer(".", "-", "_", "-").Replace(a.Key)
 }
 
 var Presets = []string{"bare", "solo", "team", "full"}
@@ -68,6 +70,7 @@ func (a *answers) fill(text string, item string, index int) string {
 	text = strings.ReplaceAll(text, "{name}", a.values["name"])
 	text = strings.ReplaceAll(text, "{title}", a.values["title"])
 	text = strings.ReplaceAll(text, "{offset}", strconv.Itoa((index+1)*10))
+	text = strings.ReplaceAll(text, "{read}", config.DefaultRead(a.values["claude_files"]))
 	if roles := a.list("roles"); len(roles) > 0 {
 		text = strings.ReplaceAll(text, "{first role}", roles[0])
 	}
@@ -247,6 +250,9 @@ func (a *answers) toml(name, preset string, modules []string) (string, error) {
 		fmt.Fprintf(&b, "title = %s\n", tomlString(t))
 	}
 	fmt.Fprintf(&b, "lead = %s\n", tomlString(a.values["lead"]))
+	if v := a.values["claude_files"]; v != "" && v != "repo" {
+		fmt.Fprintf(&b, "claude_files = %s\n", tomlString(v))
+	}
 	fmt.Fprintf(&b, "modules = %s\n", tomlList(modules))
 	type entry struct{ key, value string }
 	tables := []struct {

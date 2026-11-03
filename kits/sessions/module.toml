@@ -23,3 +23,8 @@ default = "lead"
 key = "lead"
 question = "the role that merges"
 default = "{first role}"
+
+[[asks]]
+key = "claude_files"
+question = "where Claude's files go: repo, or local to each clone and out of git"
+default = "repo"

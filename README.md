@@ -41,6 +41,7 @@ left out inside a project's clone, with MINGO_PROJECT set, or with a default pro
   mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
   mingo apply <project>                 land the files of the project's modules through a pull request
   mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
   mingo secret review <project>         set the review's token from what claude setup-token printed
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
   mingo install                         the command, tmux and Claude settings
@@ -124,6 +125,7 @@ lead = "lead"                      # the first role by default
 opener = "You are the {role}. Read your handoff memory, then continue."
 autostart = ["lead"]               # what mingo service starts at boot
 claude_args = ["--permission-mode", "auto", "--remote-control"]
+claude_files = "repo"              # or local: CLAUDE.md, what it imports and .claude in each clone, out of git
 modules = ["workflow", "ci", "review", "team", "tracker"]   # sessions is always on
 
 [[roles]]
@@ -170,7 +172,7 @@ stack = "pnpm"                     # pnpm, npm or go
 check = "pnpm check"               # pnpm <check> or npm run <check> by default
 
 [review]
-read = "CLAUDE.md first"
+read = "CLAUDE.md first"           # README.md first when claude_files is local
 categories = ["correctness (a wrong result, a crash)", "a missing test for an edge case"]
 skip = "formatting, lint or style"
 

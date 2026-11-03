@@ -200,6 +200,10 @@ func Apply(d Deps) error {
 			}
 		}
 	}
+	clones, err := d.clones()
+	if err != nil {
+		return err
+	}
 	co, cleanup, err := d.checkout(true)
 	if err != nil {
 		return err
@@ -213,80 +217,111 @@ func Apply(d Deps) error {
 	if err != nil {
 		return err
 	}
-	next, lockChanged := NextLock(steps, lock, d.Version)
-	var written, removed []string
 	scratch := filepath.Join(filepath.Dir(co.dir), "diff")
+	pushed, err := d.applyRepo(co, lock, steps, scratch)
+	if err != nil {
+		return err
+	}
+	_, local, err := d.split(mods, files)
+	if err != nil {
+		return err
+	}
+	wrote, err := d.applyClones(mods, local, clones, scratch)
+	if err != nil {
+		return err
+	}
+	if !pushed && !wrote {
+		fmt.Fprintln(d.Out, "nothing to apply")
+	}
+	return nil
+}
+
+// writes and removes what the steps say in dir, and prints each, after prefix
+func (d Deps) land(dir, prefix string, steps []Step, scratch string, remove func(path string) error) ([]string, []string, error) {
+	var written, removed []string
 	for _, s := range steps {
 		switch s.Action {
 		case Add, Update:
-			full := filepath.Join(co.dir, filepath.FromSlash(s.File.Path))
+			full := filepath.Join(dir, filepath.FromSlash(s.File.Path))
 			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-				return err
+				return nil, nil, err
 			}
 			if err := os.WriteFile(full, []byte(s.File.Text), 0o644); err != nil {
-				return err
+				return nil, nil, err
 			}
 			written = append(written, s.File.Path)
 			verb := "adds"
 			if s.Action == Update {
 				verb = "updates"
 			}
-			fmt.Fprintf(d.Out, "%s %s\n", verb, s.File.Path)
+			fmt.Fprintf(d.Out, "%s%s %s\n", prefix, verb, s.File.Path)
 		case Edited:
 			why := "the project changed it, and mingo now renders"
 			if s.Own {
 				why = "the project has its own, and mingo renders"
 			}
-			fmt.Fprintf(d.Out, "leaves %s alone, %s:\n%s", s.File.Path, why, d.diff(scratch, s))
+			fmt.Fprintf(d.Out, "%sleaves %s alone, %s:\n%s", prefix, s.File.Path, why, d.diff(scratch, s))
 		case Remove:
-			if _, err := d.git(co.dir, "rm", "--quiet", "--", s.File.Path); err != nil {
-				return err
+			if err := remove(s.File.Path); err != nil {
+				return nil, nil, err
 			}
 			removed = append(removed, s.File.Path)
-			fmt.Fprintf(d.Out, "removes %s, which no module renders now\n", s.File.Path)
+			fmt.Fprintf(d.Out, "%sremoves %s, which no module renders now\n", prefix, s.File.Path)
 		case Leave:
 			if s.Old != nil {
-				fmt.Fprintf(d.Out, "keeps %s, which no module renders now and the project changed\n", s.File.Path)
+				fmt.Fprintf(d.Out, "%skeeps %s, which no module renders now and the project changed\n", prefix, s.File.Path)
 			}
 		}
 	}
+	return written, removed, nil
+}
+
+// commits the steps and pushes them, as the first commit or to the kit's pull request, and says whether there was anything to push
+func (d Deps) applyRepo(co *checkout, lock *Lock, steps []Step, scratch string) (bool, error) {
+	next, lockChanged := NextLock(steps, lock, d.Version)
+	written, removed, err := d.land(co.dir, "", steps, scratch, func(path string) error {
+		_, err := d.git(co.dir, "rm", "--quiet", "--", path)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
 	if len(written) == 0 && len(removed) == 0 && !lockChanged {
-		fmt.Fprintln(d.Out, "nothing to apply")
-		return nil
+		return false, nil
 	}
 	full := filepath.Join(co.dir, filepath.FromSlash(LockPath))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.WriteFile(full, next.Bytes(), 0o644); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := d.git(co.dir, append([]string{"add", "--", LockPath}, written...)...); err != nil {
-		return err
+		return false, err
 	}
 	subject := "mingo kit: " + moduleList(steps, append(append([]string(nil), written...), removed...))
 	if _, err := d.git(co.dir, "commit", "--quiet", "-m", subject); err != nil {
-		return err
+		return false, err
 	}
 	base := d.Project.Workflow.Base
 	if co.empty {
 		if _, err := d.git(co.dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+base); err != nil {
-			return err
+			return false, err
 		}
 		fmt.Fprintf(d.Out, "the first commit on %s: %s\n", base, subject)
-		return nil
+		return true, nil
 	}
 	if co.kit != "" {
 		if _, err := d.git(co.dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+Branch); err != nil {
-			return fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
+			return false, fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
 		}
 		fmt.Fprintf(d.Out, "pushed to the open pull request %s\n", co.kit)
-		return nil
+		return true, nil
 	}
 	if _, err := d.git(co.dir, "push", "--quiet", "--force-with-lease=refs/heads/"+Branch+":"+co.sha, "origin", "HEAD:refs/heads/"+Branch); err != nil {
-		return fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
+		return false, fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
 	}
-	return d.pullRequest(co.dir, subject, steps)
+	return true, d.pullRequest(co.dir, subject, steps)
 }
 
 func moduleList(steps []Step, written []string) string {
@@ -333,6 +368,19 @@ func (d Deps) pullRequest(dir, subject string, steps []Step) error {
 }
 
 func (d Deps) plan(mods []Module, files []File, co *checkout, lock *Lock) ([]Step, error) {
+	if d.Project.ClaudeLocal() {
+		repo, local, err := d.split(mods, files)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range claudePaths(local) {
+			if _, ok := co.read(path); ok {
+				return nil, fmt.Errorf("claude_files is local, so Claude's files stay out of the repository, and %s has %s, take it out first", d.Project.Repo, path)
+			}
+		}
+		scripts, err := PlanScripts(mods, d.Project, co.read)
+		return append(Plan(repo, co.read, lock), scripts...), err
+	}
 	steps := append(Plan(files, co.read, lock), PlanImports(mods, co.read)...)
 	scripts, err := PlanScripts(mods, d.Project, co.read)
 	if err != nil {

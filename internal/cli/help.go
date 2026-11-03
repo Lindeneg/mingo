@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/kit"
 )
 
@@ -164,13 +165,21 @@ it is still as rendered. CLAUDE.md, package.json and .claude/settings.json stay 
 mingo only adds its lines, wraps the heavy scripts, and sets the attribution key. A second apply
 changes nothing.
 
-apply works through the lead's clone, so mingo setup comes first.
+With claude_files = "local", Claude's files stay out of the repository: CLAUDE.md, made of the text
+mingo claude edit keeps and mingo's lines, the files it imports and .claude go straight into every
+clone, and each clone's .git/info/exclude keeps them out of git. Their lock is each clone's
+.git/mingo/kit.lock, and the same rules hold. A repository that has one of them is refused until it
+is taken out.
+
+apply works through the lead's clone, and with local Claude's files through every clone, so mingo
+setup comes first.
 `,
 	"doctor": `mingo doctor <project>
 
 Says what of the project's modules is in place and what is missing, with the command that fixes
 each, and the steps only the owner can take, such as the review's token. It reads the base branch,
-so a file waiting in the kit's pull request counts as missing. It exits 1 while anything is missing.
+so a file waiting in the kit's pull request counts as missing. With claude_files = "local" it reads
+Claude's files in every clone too. It exits 1 while anything is missing.
 `,
 	"secret": `mingo secret review <project>
 
@@ -179,6 +188,13 @@ review workflow runs with. Run claude setup-token first, then this, and paste wh
 terminal what is pasted is not shown, and without one the token is read from stdin.
 `,
 	"secret review": "",
+	"claude": `mingo claude edit <project>
+
+Opens the CLAUDE.md of a project whose claude_files is local in $EDITOR, or vi without one. mingo
+keeps it in ~/.config/mingo/projects/<project>/CLAUDE.md, out of every repository, and mingo apply
+writes it into every clone with mingo's lines below it.
+`,
+	"claude edit": "",
 	"pr": `mingo pr merge <number>
 mingo pr rebase <branch>
 
@@ -273,6 +289,7 @@ whenever a session ends. It is not for running by hand.
 
 func init() {
 	pages["secret review"] = pages["secret"]
+	pages["claude edit"] = pages["claude"]
 }
 
 func (e *env) newPage() string {
@@ -347,6 +364,8 @@ func defaultText(def string) string {
 		return "the title unless set"
 	case "{offset}":
 		return "10, 20 and on in role order unless set"
+	case "{read}":
+		return config.DefaultRead("repo") + ", or " + config.DefaultRead("local") + " when Claude's files are local, unless set"
 	}
 	return def + " unless set"
 }

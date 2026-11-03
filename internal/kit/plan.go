@@ -26,7 +26,7 @@ type Step struct {
 const Instructions = "CLAUDE.md"
 
 // CLAUDE.md is the project's own file, so mingo only adds the imports and the lines its modules need to it
-func PlanImports(mods []Module, read func(path string) ([]byte, bool)) []Step {
+func mingoLines(mods []Module) ([]string, map[string]string) {
 	var wanted []string
 	module := map[string]string{}
 	for _, m := range mods {
@@ -39,6 +39,11 @@ func PlanImports(mods []Module, read func(path string) ([]byte, bool)) []Step {
 			module[line] = m.Name
 		}
 	}
+	return wanted, module
+}
+
+func PlanImports(mods []Module, read func(path string) ([]byte, bool)) []Step {
+	wanted, module := mingoLines(mods)
 	if len(wanted) == 0 {
 		return nil
 	}

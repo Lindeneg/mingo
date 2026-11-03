@@ -251,12 +251,51 @@ func Doctor(d Deps) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	missing += d.report(steps)
+	if p.ClaudeLocal() {
+		_, local, err := d.split(mods, files)
+		if err != nil {
+			return 0, err
+		}
+		for _, role := range p.RoleNames() {
+			c, err := d.clone(role)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(d.Out, "  Claude's files in %s's clone\n", role)
+			unexcluded, _, err := c.unexcluded(mods)
+			if err != nil {
+				return 0, err
+			}
+			if len(unexcluded) == 0 {
+				fmt.Fprintln(d.Out, "    in place: Claude's files out of git in .git/info/exclude")
+			} else {
+				fmt.Fprintf(d.Out, "    missing: %s in .git/info/exclude (mingo apply %s)\n", strings.Join(unexcluded, " "), p.Name)
+				missing++
+			}
+			lock, err := c.lock()
+			if err != nil {
+				return 0, err
+			}
+			steps, err := planClaude(local, c.read, lock)
+			if err != nil {
+				return 0, fmt.Errorf("in %s's clone, %v", role, err)
+			}
+			missing += d.report(steps)
+		}
+	}
+	return missing, nil
+}
+
+// prints what of the steps is in place and what is missing, and returns how many are missing
+func (d Deps) report(steps []Step) int {
+	missing := 0
 	for _, s := range steps {
 		if s.Owned {
 			if s.Action == Same {
 				fmt.Fprintf(d.Out, "    in place: %s in %s\n", s.What, s.File.Path)
 			} else {
-				fmt.Fprintf(d.Out, "    missing: %s in %s (mingo apply %s)\n", s.What, s.File.Path, p.Name)
+				fmt.Fprintf(d.Out, "    missing: %s in %s (mingo apply %s)\n", s.What, s.File.Path, d.Project.Name)
 				missing++
 			}
 			continue
@@ -267,10 +306,10 @@ func Doctor(d Deps) (int, error) {
 		case Kept:
 			fmt.Fprintf(d.Out, "    in place, as the project changed it: %s\n", s.File.Path)
 		case Add:
-			fmt.Fprintf(d.Out, "    missing: %s (mingo apply %s)\n", s.File.Path, p.Name)
+			fmt.Fprintf(d.Out, "    missing: %s (mingo apply %s)\n", s.File.Path, d.Project.Name)
 			missing++
 		case Update:
-			fmt.Fprintf(d.Out, "    out of date: %s (mingo apply %s)\n", s.File.Path, p.Name)
+			fmt.Fprintf(d.Out, "    out of date: %s (mingo apply %s)\n", s.File.Path, d.Project.Name)
 			missing++
 		case Edited:
 			if s.Own {
@@ -279,7 +318,7 @@ func Doctor(d Deps) (int, error) {
 				fmt.Fprintf(d.Out, "    changed by the project, and mingo renders it otherwise: %s\n", s.File.Path)
 			}
 		case Remove:
-			fmt.Fprintf(d.Out, "    left over: %s, which no module renders now (mingo apply %s)\n", s.File.Path, p.Name)
+			fmt.Fprintf(d.Out, "    left over: %s, which no module renders now (mingo apply %s)\n", s.File.Path, d.Project.Name)
 			missing++
 		case Leave:
 			if s.Old != nil {
@@ -287,7 +326,7 @@ func Doctor(d Deps) (int, error) {
 			}
 		}
 	}
-	return missing, nil
+	return missing
 }
 
 // sets the review's token on the project's repository from what claude setup-token printed
