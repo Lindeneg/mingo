@@ -132,6 +132,87 @@ func TestInstallLeavesASettingsFileWithAKeyOfAnotherTypeAsItIs(t *testing.T) {
 	}
 }
 
+func TestInstallSaysWhereASettingsFileStopsBeingJSONAndWhenItIsNoObject(t *testing.T) {
+	h := newHome(t)
+	file := filepath.Join(h.home, ".claude", "settings.json")
+	h.write(file, "{\n  \"theme\": \"dark\",\n  oops\n}\n")
+	if r := h.mingo("install"); r.code != 1 || !strings.HasSuffix(r.out, "mingo: "+file+" is not valid JSON at line 3, column 3 (invalid character 'o' looking for beginning of object key string), left as it is\n") {
+		t.Fatal(r.code, r.out)
+	}
+	h.write(file, "[1, 2]\n")
+	if r := h.mingo("install"); r.code != 1 || !strings.HasSuffix(r.out, "mingo: "+file+" is not a JSON object, left as it is\n") || h.read(file) != "[1, 2]\n" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestInstallWritesALinkedSettingsFileWhereTheLinkPoints(t *testing.T) {
+	h := newHome(t)
+	kept := filepath.Join(h.root, "dotfiles", "settings.json")
+	h.write(kept, `{"theme": "dark"}`)
+	link := filepath.Join(h.home, ".claude", "settings.json")
+	h.mkdir(filepath.Dir(link))
+	if err := os.Symlink("../../dotfiles/settings.json", link); err != nil {
+		t.Fatal(err)
+	}
+	r := h.mingo("install")
+	if r.code != 0 || !strings.Contains(r.out, "claude settings: "+link+", through the link to "+kept+"\n") {
+		t.Fatal(r.out)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the link was replaced")
+	}
+	if s := h.settings(); s["theme"] != "dark" || s["isolatePeerMachines"] != true {
+		t.Fatal(compact(s))
+	}
+	if r := h.mingo("install"); !strings.Contains(r.out, "claude settings: "+link+" unchanged\n") {
+		t.Fatal(r.out)
+	}
+}
+
+func TestInstallSaysEachKeyItChangedWithItsOldAndNewValue(t *testing.T) {
+	h := newHome(t)
+	h.write(filepath.Join(h.home, ".claude", "settings.json"), `{"crossSessionInbound": "hold", "permissions": {"deny": ["Bash(pkill *)"]}}`)
+	bin := filepath.Join(h.home, ".local", "bin", "mingo")
+	want := "claude settings: " + filepath.Join(h.home, ".claude", "settings.json") + "\n" +
+		"  crossSessionInbound was \"hold\", now \"accept\"\n" +
+		"  isolatePeerMachines was unset, now true\n" +
+		"  permissions.deny gained \"Bash(killall *)\"\n" +
+		"  hooks.PreToolUse gained \"" + bin + " guard write\"\n" +
+		"  hooks.PreToolUse gained \"" + bin + " guard bash\"\n"
+	if r := h.mingo("install"); r.code != 0 || !strings.Contains(r.out, want) {
+		t.Fatal(r.out)
+	}
+}
+
+func TestTheGuardHooksRunFromAHomeWithASpaceInIt(t *testing.T) {
+	h := newHome(t)
+	spaced := filepath.Join(h.root, "my home")
+	h.mkdir(filepath.Join(spaced, ".local", "bin"))
+	if r := h.runIn("", []string{"HOME=" + spaced}, h.bin, "install"); r.code != 0 {
+		t.Fatal(r.out)
+	}
+	var s struct {
+		Hooks struct {
+			PreToolUse []struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"PreToolUse"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(h.read(filepath.Join(spaced, ".claude", "settings.json"))), &s); err != nil || len(s.Hooks.PreToolUse) != 2 {
+		t.Fatal(err, h.read(filepath.Join(spaced, ".claude", "settings.json")))
+	}
+	command := s.Hooks.PreToolUse[1].Hooks[0].Command
+	if command != "'"+filepath.Join(spaced, ".local", "bin", "mingo")+"' guard bash" {
+		t.Fatal(command)
+	}
+	in := `{"tool_name": "Bash", "tool_input": {"command": "pkill node"}}`
+	if r := h.runIn("", []string{"HOME=" + spaced}, "sh", "-c", "printf '%s' \"$1\" | "+command, "_", in); r.code != 0 || !strings.Contains(r.out, "Never end a process by its name") {
+		t.Fatal(r.code, r.out)
+	}
+}
+
 func TestInstallKeepsTheModeOfTheSettingsFile(t *testing.T) {
 	h := newHome(t)
 	file := filepath.Join(h.home, ".claude", "settings.json")
@@ -172,6 +253,39 @@ func TestServiceEnableInstallsTheUnitAndEnablesTheProjectsInstance(t *testing.T)
 	}
 }
 
+func TestServiceEnableSaysWhetherLingeringIsOnAndDisableSaysWhatItDid(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("systemd is on linux alone")
+	}
+	h := newHome(t)
+	h.addDemoWith(`autostart = ["lead"]`)
+	fake := filepath.Join(h.root, "fake-systemctl")
+	h.write(fake, "#!/usr/bin/env bash\nexit 0\n")
+	os.Chmod(fake, 0o755)
+	h.setEnv("MINGO_SYSTEMCTL="+fake, "USER=someone")
+	asked := filepath.Join(h.root, "loginctl")
+	for _, c := range []struct{ linger, want string }{
+		{"yes", "mingo@demo starts lead at boot, as lingering is on for someone\n"},
+		{"no", "mingo@demo starts lead when someone logs in, not at boot, as lingering is off for someone\nloginctl enable-linger turns lingering on, so it starts at boot\n"},
+		{"", "mingo@demo starts lead at boot while lingering is on for someone\nloginctl could not say whether it is, loginctl enable-linger turns it on\n"},
+	} {
+		script := "echo \"$*\" >" + shellQuote(asked) + "\necho Linger=" + c.linger + "\n"
+		if c.linger == "" {
+			script = "exit 1\n"
+		}
+		h.fakeTool("loginctl", script)
+		if r := h.mingo("service", "enable", "demo"); r.code != 0 || r.out != c.want {
+			t.Fatal(c.linger, r.out)
+		}
+	}
+	if got := h.read(asked); got != "show-user "+strconv.Itoa(os.Getuid())+" --property=Linger\n" {
+		t.Fatal(got)
+	}
+	if r := h.mingo("service", "disable", "demo"); r.code != 0 || r.out != "mingo@demo is disabled, so demo's autostart roles no longer start at boot\n" {
+		t.Fatal(r.out)
+	}
+}
+
 func TestServiceEnableWritesThePlistAndEnablesTheAgentAndDisableUndoesIt(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("launchd is on macos alone")
@@ -201,7 +315,7 @@ func TestServiceEnableWritesThePlistAndEnablesTheAgentAndDisableUndoesIt(t *test
 	if h.read(calls) != "enable "+target+"\n" {
 		t.Fatal(h.read(calls))
 	}
-	if r := h.mingo("service", "disable", "demo"); r.code != 0 || exists(plist) {
+	if r := h.mingo("service", "disable", "demo"); r.code != 0 || exists(plist) || r.out != "mingo.demo is disabled, so demo's autostart roles no longer start at login\n" {
 		t.Fatal(r.out)
 	}
 	if r := h.mingo("service", "disable", "demo"); r.code != 0 {
@@ -250,6 +364,61 @@ func TestHelpListsTheCommandsAndExplainsEach(t *testing.T) {
 		t.Fatal(r.out)
 	}
 	if r := h.mingo("help", "nope"); r.code != 1 || r.out != "mingo: no command nope, mingo help lists them\n" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestAnUnknownCommandIsNamedAndExits2(t *testing.T) {
+	h := newHome(t)
+	for _, words := range [][]string{{"bogus"}, {"bogus", "--help"}} {
+		if r := h.mingo(words...); r.code != 2 || r.out != "mingo: unknown command \"bogus\", mingo help lists them\n" {
+			t.Fatal(words, r.code, r.out)
+		}
+	}
+	if r := h.mingo("project", "bogus", "x"); r.code != 2 || r.out != "mingo: unknown command \"project bogus\"\nusage: mingo project add|show|edit <name>\n" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestExtraArgumentsAreNamedWithTheCommandsUsage(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"ls", "extra"}, "mingo: extra argument \"extra\"\nusage: mingo ls\n"},
+		{[]string{"setup", "demo", "extra"}, "mingo: extra argument \"extra\"\nusage: mingo setup <project>\n"},
+		{[]string{"path", "demo/lead", "a", "b"}, "mingo: extra arguments \"a\" \"b\"\nusage: mingo path <target>\n"},
+		{[]string{"project", "show", "demo", "x"}, "mingo: extra argument \"x\"\nusage: mingo project show <name>\n"},
+		{[]string{"service", "enable", "demo", "x"}, "mingo: extra argument \"x\"\nusage: mingo service enable|disable <project>\n"},
+		{[]string{"status", "--json"}, "mingo: unknown flag \"--json\"\nusage: mingo status [project...]\n"},
+		{[]string{"project", "add"}, "usage: mingo project add <name>\n"},
+		{[]string{"say", "demo/lead"}, "usage: mingo say <target> <message>\n"},
+	} {
+		if r := h.mingo(c.words...); r.code != 2 || r.out != c.want {
+			t.Fatal(c.words, r.code, r.out)
+		}
+	}
+}
+
+func TestAHelpFlagAnywhereBeforeTwoDashesShowsTheCommandsPage(t *testing.T) {
+	h := newHome(t)
+	for _, c := range []struct {
+		words []string
+		page  string
+	}{
+		{[]string{"start", "demo", "--autostart", "--help"}, "mingo start [--autostart] [target...]\n"},
+		{[]string{"stop", "--all", "-h"}, "mingo stop [target...]\n"},
+		{[]string{"pr", "merge", "12", "--help"}, "mingo pr merge <number>\n"},
+		{[]string{"service", "enable", "demo", "-h"}, "mingo service enable|disable <project>\n"},
+		{[]string{"help", "--help"}, "mingo help [command]\n"},
+	} {
+		if r := h.mingo(c.words...); r.code != 0 || !strings.HasPrefix(r.out, c.page) {
+			t.Fatal(c.words, r.code, r.out)
+		}
+	}
+	if r := h.mingo("heavy", "label", "--", "sh", "-c", "echo ran $1", "_", "--help"); r.code != 0 || r.out != "ran --help\n" {
 		t.Fatal(r.code, r.out)
 	}
 }

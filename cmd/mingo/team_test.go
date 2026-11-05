@@ -43,8 +43,28 @@ func TestGateAndPrTakeTheProjectOfTheCloneTheyRunIn(t *testing.T) {
 	if r := h.runIn(lead, nil, h.bin, "pr", "rebase", "trunk"); r.code != 1 || r.out != "trunk is never rebased\n" {
 		t.Fatal(r.code, r.out)
 	}
-	if r := h.runIn(lead, nil, h.bin, "pr", "merge"); r.code != 2 || r.out != "usage: mingo pr merge <pull request number>\n" {
+	if r := h.runIn(lead, nil, h.bin, "pr", "merge"); r.code != 2 || r.out != "usage: mingo pr merge <number>\n" {
 		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestPrAndGateShowTheirUsageBeforeLookingForAClone(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"pr"}, "usage: mingo pr merge <number>\n       mingo pr rebase <branch>\n"},
+		{[]string{"pr", "merge"}, "usage: mingo pr merge <number>\n"},
+		{[]string{"pr", "merge", "abc"}, "mingo: \"abc\" is not a pull request number\nusage: mingo pr merge <number>\n"},
+		{[]string{"pr", "rebase", "--onto"}, "mingo: unknown flag \"--onto\"\nusage: mingo pr rebase <branch>\n"},
+		{[]string{"gate"}, "usage: mingo gate <log>\n"},
+		{[]string{"gate", "a.log", "b.log"}, "mingo: extra argument \"b.log\"\nusage: mingo gate <log>\n"},
+	} {
+		if r := h.mingo(c.words...); r.code != 2 || r.out != c.want {
+			t.Fatal(c.words, r.code, r.out)
+		}
 	}
 }
 

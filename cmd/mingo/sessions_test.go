@@ -3,6 +3,8 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -71,8 +73,113 @@ func TestStartAutostartStartsNothingWithoutAutostartRoles(t *testing.T) {
 	}
 }
 
+func TestStartTakesItsFlagAnywhereAndRefusesAnyOther(t *testing.T) {
+	h := newHome(t)
+	h.installStandIn()
+	h.addDemoWith(`autostart = ["helper"]`)
+	r := h.mingo("start", "demo", "--bogus")
+	if r.code != 2 || r.out != "mingo: unknown flag \"--bogus\"\nusage: mingo start [--autostart] [target...]\n" {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("start", "demo", "--autostart"); r.out != "demo-helper: started on the default model, effort default\n" {
+		t.Fatal(r.out)
+	}
+}
+
+func TestStartAndStopResolveEveryTargetBeforeTouchingAnySession(t *testing.T) {
+	h := newHome(t)
+	h.installStandIn()
+	h.addDemo()
+	r := h.mingo("start", "demo/lead", "demo/typo")
+	if r.code != 1 || r.out != "mingo: demo has no role or alias typo, it has lead helper\n" {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("status", "demo"); !strings.HasPrefix(r.out, "demo-lead: not running") {
+		t.Fatal(r.out)
+	}
+	h.startLoop("obeys")
+	first := h.nthStart(1)
+	if r := h.mingo("stop", "demo/lead", "demo/typo"); r.code != 1 || !strings.Contains(r.out, "no role or alias typo") {
+		t.Fatal(r.code, r.out)
+	}
+	if !isAlive(first) || exists(h.marker("stop")) {
+		t.Fatal("stop touched demo/lead")
+	}
+}
+
+func TestStopAndRestartRefuseAnUnknownFlagAndRestartTakesOneTarget(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	if r := h.mingo("stop", "--all"); r.code != 2 || r.out != "mingo: unknown flag \"--all\"\nusage: mingo stop [target...]\n" {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("restart", "demo/lead", "demo/helper"); r.code != 2 || r.out != "mingo: extra argument \"demo/helper\"\nusage: mingo restart [--force] <target>\n" {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("restart", "demo/helper", "--force"); r.code != 1 || r.out != "mingo: demo-helper is not running, use mingo start\n" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestStartRefusesWhileClaudeCodeIsNotInstalled(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	r := h.runIn("", []string{"MINGO_CLAUDE=/nowhere/claude"}, h.bin, "start", "demo/lead")
+	if r.code != 1 || r.out != "mingo: /nowhere/claude is not installed, so no session can start, see https://code.claude.com/docs/en/setup\n" {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("status", "demo"); !strings.HasPrefix(r.out, "demo-lead: not running") {
+		t.Fatal(r.out)
+	}
+}
+
+// a path of tmux alone, so no claude a machine has installed is found
+func (h *home) pathWithoutClaude() string {
+	h.t.Helper()
+	tmux, err := exec.LookPath("tmux")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	dir := filepath.Join(h.root, "only-tmux")
+	h.mkdir(dir)
+	if err := os.Symlink(tmux, filepath.Join(dir, "tmux")); err != nil {
+		h.t.Fatal(err)
+	}
+	return "PATH=" + dir
+}
+
+func TestStatusSaysClaudeCodeIsNotInstalledRatherThanNotLoggedIn(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	r := h.runIn("", []string{h.pathWithoutClaude()}, h.bin, "status", "demo")
+	if lines := r.lines(); r.code != 0 || len(lines) != 3 || lines[2] != "claude: not installed on this host, see https://code.claude.com/docs/en/setup" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestLsStatusAndAgentsShowAConfigThatDoesNotLoadInItsPlaceAndGoOn(t *testing.T) {
+	h := newHome(t)
+	h.installStandIn()
+	h.addProject("broken", `roles = 1`)
+	h.addDemo()
+	h.addProject("zeta", `[[roles]]`, `name = "solo"`)
+	file := filepath.Join(h.config, "projects", "broken.toml")
+	for _, words := range [][]string{{"ls"}, {"status"}, {"agents"}} {
+		r := h.mingo(words...)
+		lines := r.lines()
+		if r.code != 1 || len(lines) < 3 || !strings.HasPrefix(lines[0], "mingo: "+file+": ") && !strings.HasPrefix(lines[1], "mingo: "+file+": ") ||
+			!strings.Contains(r.out, "demo") || !strings.Contains(r.out, "solo") {
+			t.Fatal(words, r.code, r.out)
+		}
+	}
+	if r := h.mingo("status", "demo", "nope"); r.code != 1 || !strings.Contains(r.out, "demo-helper: not running") || !strings.Contains(r.out, "mingo: no project named nope") {
+		t.Fatal(r.code, r.out)
+	}
+}
+
 func TestStartRefusesARoleWithoutAClone(t *testing.T) {
 	h := newHome(t)
+	h.installStandIn()
 	h.addDemo()
 	if err := removeDir(filepath.Join(h.home, "dev", "demo", "helper")); err != nil {
 		t.Fatal(err)
@@ -120,10 +227,25 @@ func TestClearFromInsideACloneRestartsThatRole(t *testing.T) {
 
 func TestClearInsideASessionUsesTheNamesTheLoopGaveIt(t *testing.T) {
 	h := newHome(t)
+	h.installStandIn()
 	h.addDemo()
-	h.runIn(h.root, []string{"MINGO_PROJECT=demo", "MINGO_ROLE=helper"}, h.bin, "clear")
-	if !exists(h.marker("restart", "demo", "helper")) {
-		t.Fatal("no restart marker")
+	if r := h.mingo("start", "demo/helper"); r.code != 0 {
+		t.Fatal(r.out)
+	}
+	h.mustWait(15, "the first start", h.startsAre(1))
+	r := h.runIn(h.root, []string{"MINGO_PROJECT=demo", "MINGO_ROLE=helper"}, h.bin, "clear")
+	if r.out != "demo/helper: the loop ends this session within seconds and starts a fresh one\n" {
+		t.Fatal(r.out)
+	}
+	h.mustWait(20, "the second start", h.startsAre(2))
+}
+
+func TestClearSaysSoAndChangesNothingWhenNoSessionOfTheRoleRuns(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	r := h.runIn(h.root, []string{"MINGO_PROJECT=demo", "MINGO_ROLE=helper"}, h.bin, "clear")
+	if r.code != 1 || r.out != "mingo: demo-helper is not running, so there is no session to clear\n" || exists(h.marker("restart", "demo", "helper")) {
+		t.Fatal(r.code, r.out)
 	}
 }
 

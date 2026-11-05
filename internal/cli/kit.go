@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/Lindeneg/mingo"
 	"github.com/Lindeneg/mingo/internal/config"
@@ -42,7 +43,7 @@ func (e *env) apply(name string) error {
 
 func (e *env) claude(action, name string) error {
 	if action != "edit" || name == "" {
-		return errors.New("claude edit <project>")
+		return badUsage("", "claude")
 	}
 	p, err := config.Find(name)
 	if err != nil {
@@ -55,7 +56,13 @@ func (e *env) claude(action, name string) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
-	return edit(file)
+	if err := edit(file); err != nil {
+		return err
+	}
+	if _, err := config.Load(p.Name); err != nil {
+		return fmt.Errorf("%s is saved, but the project's config no longer loads: %v", file, err)
+	}
+	return nil
 }
 
 func (e *env) doctor(name string) error {
@@ -75,7 +82,7 @@ func (e *env) doctor(name string) error {
 
 func (e *env) secret(args []string) error {
 	if len(args) != 2 || args[0] != "review" {
-		return errors.New("secret review <project>")
+		return badUsage("", "secret")
 	}
 	d, err := e.kitDeps(args[1])
 	if err != nil {
@@ -86,18 +93,22 @@ func (e *env) secret(args []string) error {
 		fmt.Fprint(e.out, "paste what claude setup-token printed: ")
 		if sys.SetEcho(fd, false) == nil {
 			defer sys.SetEcho(fd, true)
-			// ctrl c ends mingo before the defer runs, so the echo comes back here too
+			// a signal ends mingo before the defer runs, so the echo comes back here too
 			interrupt := make(chan os.Signal, 1)
-			signal.Notify(interrupt, os.Interrupt)
+			signal.Notify(interrupt, os.Interrupt, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
 			defer func() {
 				signal.Stop(interrupt)
 				close(interrupt)
 			}()
 			go func() {
-				if _, ok := <-interrupt; ok {
+				if sig, ok := <-interrupt; ok {
 					sys.SetEcho(fd, true)
 					fmt.Fprintln(e.out)
-					os.Exit(130)
+					code := 130
+					if n, ok := sig.(syscall.Signal); ok {
+						code = 128 + int(n)
+					}
+					os.Exit(code)
 				}
 			}()
 		}

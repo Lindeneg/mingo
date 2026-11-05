@@ -161,9 +161,16 @@ func TestLoopEndsItsOwnSessionWhenTheMarkerHoldsZero(t *testing.T) {
 
 func TestLoopSaysAFailedStartLeavesNoMarkerAndTriesAgain(t *testing.T) {
 	h := newHome(t)
-	h.setEnv("MINGO_LOOP_DELAY=2", "MINGO_CLAUDE="+filepath.Join(h.root, "no-such-claude"))
+	claude := filepath.Join(h.root, "no-such-claude")
+	h.setEnv("MINGO_LOOP_DELAY=2", "MINGO_CLAUDE="+claude)
 	h.addDemo()
-	h.mingo("start", "demo/lead")
+	// mingo start refuses a claude that is not there, so it goes away only once the loop runs
+	h.write(claude, "#!/bin/sh\n")
+	os.Chmod(claude, 0o755)
+	if r := h.mingo("start", "demo/lead"); r.code != 0 {
+		t.Fatal(r.out)
+	}
+	removeFile(claude)
 	h.mustWait(30, "two failed starts", func() bool { return len(endedNoCLI.FindAllString(h.screen(), -1)) >= 2 })
 	s := h.screen()
 	if !strings.Contains(s, "a failed start") || strings.Contains(s, "the loop ended it") || h.starts() != 0 {

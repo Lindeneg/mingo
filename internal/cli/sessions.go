@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,34 +87,90 @@ func specsOrDefault(specs []string) ([]string, error) {
 	return []string{name}, nil
 }
 
-func (e *env) start(args []string) error {
-	onlyAutostart := len(args) > 0 && args[0] == "--autostart"
-	if onlyAutostart {
-		args = args[1:]
+// the flags a command takes out of its arguments, refusing any other
+func flags(command string, args []string, allowed ...string) (map[string]bool, []string, error) {
+	set := map[string]bool{}
+	var rest []string
+	for _, a := range args {
+		switch {
+		case slices.Contains(allowed, a):
+			set[a] = true
+		case strings.HasPrefix(a, "-"):
+			return nil, nil, badUsage(fmt.Sprintf("unknown flag %q", a), command)
+		default:
+			rest = append(rest, a)
+		}
 	}
-	specs, err := specsOrDefault(args)
+	return set, rest, nil
+}
+
+type picked struct {
+	p     *config.Project
+	roles []string
+}
+
+// every target is resolved before any session is touched, so a typo changes nothing
+func pick(specs []string, onlyAutostart bool) ([]picked, error) {
+	specs, err := specsOrDefault(specs)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var all []picked
 	for _, spec := range specs {
 		p, role, err := config.ParseTarget(spec)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		var picked []string
 		switch {
 		case role != "":
-			picked = []string{role}
+			all = append(all, picked{p, []string{role}})
 		case onlyAutostart:
-			picked = p.Autostart
-			if len(picked) == 0 {
-				fmt.Fprintf(e.out, "%s: no autostart roles, nothing to start\n", p.Name)
-			}
+			all = append(all, picked{p, p.Autostart})
 		default:
-			picked = p.RoleNames()
+			all = append(all, picked{p, p.RoleNames()})
 		}
-		for _, r := range picked {
-			if err := e.startRole(p, r); err != nil {
+	}
+	return all, nil
+}
+
+func claudeCommand() string {
+	if v := os.Getenv("MINGO_CLAUDE"); v != "" {
+		return v
+	}
+	return "claude"
+}
+
+const claudeSite = "https://code.claude.com/docs/en/setup"
+
+func (e *env) anyStopped(all []picked) bool {
+	for _, pk := range all {
+		for _, r := range pk.roles {
+			if !e.host.Has(pk.p.SessionName(r)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (e *env) start(args []string) error {
+	set, specs, err := flags("start", args, "--autostart")
+	if err != nil {
+		return err
+	}
+	all, err := pick(specs, set["--autostart"])
+	if err != nil {
+		return err
+	}
+	if claude := claudeCommand(); e.anyStopped(all) && !installed(claude) {
+		return fmt.Errorf("%s is not installed, so no session can start, see %s", claude, claudeSite)
+	}
+	for _, pk := range all {
+		if len(pk.roles) == 0 {
+			fmt.Fprintf(e.out, "%s: no autostart roles, nothing to start\n", pk.p.Name)
+		}
+		for _, r := range pk.roles {
+			if err := e.startRole(pk.p, r); err != nil {
 				return err
 			}
 		}
@@ -122,24 +179,21 @@ func (e *env) start(args []string) error {
 }
 
 func (e *env) stop(args []string) error {
-	specs, err := specsOrDefault(args)
+	_, specs, err := flags("stop", args)
+	if err != nil {
+		return err
+	}
+	all, err := pick(specs, false)
 	if err != nil {
 		return err
 	}
 	var asked []string
-	for _, spec := range specs {
-		p, role, err := config.ParseTarget(spec)
-		if err != nil {
-			return err
-		}
-		picked := p.RoleNames()
-		if role != "" {
-			picked = []string{role}
-		}
+	for _, pk := range all {
+		p := pk.p
 		if err := os.MkdirAll(p.State(), 0o755); err != nil {
 			return err
 		}
-		for _, r := range picked {
+		for _, r := range pk.roles {
 			session := p.SessionName(r)
 			if !e.host.Has(session) {
 				fmt.Fprintf(e.out, "%s: not running\n", session)
@@ -181,10 +235,14 @@ func (e *env) stop(args []string) error {
 }
 
 func (e *env) restart(args []string) error {
-	force := len(args) > 0 && args[0] == "--force"
-	if force {
-		args = args[1:]
+	set, args, err := flags("restart", args, "--force")
+	if err != nil {
+		return err
 	}
+	if len(args) > 1 {
+		return badUsage(extra(args[1:]), "restart")
+	}
+	force := set["--force"]
 	spec := ""
 	if len(args) > 0 {
 		spec = args[0]
@@ -266,7 +324,7 @@ func (e *env) peek(args []string) error {
 
 func (e *env) say(args []string) error {
 	if len(args) < 2 {
-		return errors.New("say <target> <message>")
+		return badUsage("", "say")
 	}
 	p, role, err := config.ParseRoleTarget(args[0])
 	if err != nil {
@@ -286,27 +344,38 @@ func (e *env) say(args []string) error {
 	return e.host.SendKeys(session, "Enter")
 }
 
-func projectsOrAll(names []string) ([]*config.Project, error) {
+// a project that does not load keeps its place with its error, so the others are still shown
+type loaded struct {
+	p   *config.Project
+	err error
+}
+
+func projectsOrAll(names []string) []loaded {
 	if len(names) == 0 {
 		names = config.Names()
 	}
-	var projects []*config.Project
+	var projects []loaded
 	for _, name := range names {
 		p, err := config.Find(name)
-		if err != nil {
-			return nil, err
-		}
-		projects = append(projects, p)
+		projects = append(projects, loaded{p, err})
 	}
-	return projects, nil
+	return projects
+}
+
+func installed(tool string) bool {
+	_, err := exec.LookPath(tool)
+	return err == nil
 }
 
 func (e *env) status(names []string) error {
-	projects, err := projectsOrAll(names)
-	if err != nil {
-		return err
-	}
-	for _, p := range projects {
+	failed := false
+	for _, l := range projectsOrAll(names) {
+		if l.err != nil {
+			fmt.Fprintf(e.err, "mingo: %v\n", l.err)
+			failed = true
+			continue
+		}
+		p := l.p
 		for _, r := range p.RoleNames() {
 			session := p.SessionName(r)
 			running := e.host.Has(session)
@@ -331,10 +400,17 @@ func (e *env) status(names []string) error {
 			}
 		}
 	}
-	cmd := exec.Command("claude", "auth", "status", "--text")
-	cmd.Stdout = e.out
-	if cmd.Run() != nil {
-		fmt.Fprintln(e.out, "claude: not logged in on this host")
+	if !installed("claude") {
+		fmt.Fprintf(e.out, "claude: not installed on this host, see %s\n", claudeSite)
+	} else {
+		cmd := exec.Command("claude", "auth", "status", "--text")
+		cmd.Stdout = e.out
+		if cmd.Run() != nil {
+			fmt.Fprintln(e.out, "claude: not logged in on this host")
+		}
+	}
+	if failed {
+		return exitError(1)
 	}
 	return nil
 }
@@ -389,13 +465,18 @@ func remoteLink(pid int) string {
 }
 
 func (e *env) agents(names []string) error {
-	projects, err := projectsOrAll(names)
-	if err != nil {
-		return err
-	}
+	projects := projectsOrAll(names)
 	live := liveAgents()
 	rows := [][]string{{"PROJECT", "ROLE", "STATE", "UP", "LINK"}}
-	for _, p := range projects {
+	// a nil row is a project that does not load, its error kept in failures under the row
+	failures := map[int]error{}
+	for _, l := range projects {
+		if l.err != nil {
+			failures[len(rows)] = l.err
+			rows = append(rows, nil)
+			continue
+		}
+		p := l.p
 		for _, r := range p.RoleNames() {
 			session := p.SessionName(r)
 			if !e.host.Has(session) {
@@ -427,11 +508,18 @@ func (e *env) agents(names []string) error {
 	}
 	widths := make([]int, 4)
 	for _, row := range rows {
+		if row == nil {
+			continue
+		}
 		for i := range widths {
 			widths[i] = max(widths[i], len(row[i]))
 		}
 	}
-	for _, row := range rows {
+	for n, row := range rows {
+		if row == nil {
+			fmt.Fprintf(e.err, "mingo: %v\n", failures[n])
+			continue
+		}
 		var b strings.Builder
 		for i := range widths {
 			fmt.Fprintf(&b, "%-*s  ", widths[i], row[i])
@@ -439,14 +527,20 @@ func (e *env) agents(names []string) error {
 		b.WriteString(row[4])
 		fmt.Fprintln(e.out, b.String())
 	}
+	if len(failures) > 0 {
+		return exitError(1)
+	}
 	return nil
 }
 
 func (e *env) ls() error {
+	failed := false
 	for _, name := range config.Names() {
 		p, err := config.Load(name)
 		if err != nil {
-			return err
+			fmt.Fprintf(e.err, "mingo: %v\n", err)
+			failed = true
+			continue
 		}
 		line := p.Name
 		if p.ID != "" {
@@ -467,6 +561,9 @@ func (e *env) ls() error {
 			fmt.Fprintf(e.out, "  %-12s %s%s\n", r, p.CloneDir(r), marks)
 		}
 	}
+	if failed {
+		return exitError(1)
+	}
 	return nil
 }
 
@@ -486,6 +583,13 @@ func (e *env) clear() error {
 			return errors.New("not inside a project's clone, nothing to clear")
 		}
 		name = found
+	}
+	p, err := config.Load(name)
+	if err != nil {
+		return err
+	}
+	if session := p.SessionName(role); !e.host.Has(session) {
+		return fmt.Errorf("%s is not running, so there is no session to clear", session)
 	}
 	dir := filepath.Join(config.StateDir(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

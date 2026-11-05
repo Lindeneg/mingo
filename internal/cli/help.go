@@ -18,25 +18,29 @@ var pages = map[string]string{
 	"ls": `mingo ls
 
 Lists every project with its id and repository, then each role with its clone, the lead marked.
+A project whose config does not load shows its error in its place, and ls exits 1.
 `,
 	"agents": `mingo agents [project...]
 
 Shows each role's session: its state, how long it has been up, and its Remote Control link. The
 state is stopped, starting, between (one session has ended and the next has not started), or what
-Claude Code says of the session, such as busy or idle. With no project, every project.
+Claude Code says of the session, such as busy or idle. With no project, every project. A project
+whose config does not load shows its error in its place, and agents exits 1.
 `,
 	"status": `mingo status [project...]
 
 Says of each role whether its session is running, between sessions or not running, and the model
 and effort it runs on or would start on, then the Claude login of this machine. With no project,
-every project.
+every project. A project whose config does not load shows its error in its place, and status
+exits 1.
 `,
 	"start": `mingo start [--autostart] [target...]
 
 Starts a tmux session per role. Each runs the role's loop: Claude Code in the role's clone with the
 project's opener, started again whenever a session ends, so a fresh session goes on from the
 handoff. A project starts every role, a role starts alone, and a role already running is left as
-it is. With no target, the default project.
+it is. With no target, the default project. Every target is checked before any session starts, and
+nothing starts while Claude Code is not installed.
 
   --autostart   a project starts only the roles its autostart names, as the boot service does
 
@@ -50,8 +54,8 @@ this start launches.
 	"stop": `mingo stop [target...]
 
 Asks each session to exit, waits up to 90 seconds for them all, then closes the tmux session of any
-still there. A project stops every role. With no target, the default project. MINGO_STOP_WAIT
-changes the wait, in seconds.
+still there. A project stops every role. With no target, the default project. Every target is
+checked before any session is asked. MINGO_STOP_WAIT changes the wait, in seconds.
 ` + targets,
 	"restart": `mingo restart [--force] <target>
 
@@ -91,7 +95,8 @@ seconds.
 For a session to run as its last tool call: the role's loop ends the session within seconds and
 starts a fresh one, which goes on from the handoff. Write the handoff first, since /exit ends the
 session where it stands. The project and role come from MINGO_PROJECT and MINGO_ROLE, which the
-loop sets, or from the clone the command runs in.
+loop sets, or from the clone the command runs in. With no session of the role running, it says so
+and changes nothing.
 `,
 	"path": `mingo path <target>
 
@@ -108,9 +113,10 @@ Prints a project's GitHub repository, as owner/name. With no project, the defaul
 `,
 	"default": `mingo default [project]
 
-Sets the default project, or prints it with no project named. A target that leaves the project out
-takes MINGO_PROJECT first, then the project of the clone the command runs in, then the default,
-then the one project when there is only one.
+Sets the default project, or prints the one set with no project named, and says so when none is
+set or the one set no longer exists. A target that leaves the project out takes MINGO_PROJECT first,
+then the project of the clone the command runs in, then the default, then the one project when there
+is only one.
 `,
 	"project": `mingo project add|show|edit <name>
 
@@ -135,24 +141,29 @@ Prints a project's config. The name may be the project's id.
 `,
 	"project edit": `mingo project edit <name>
 
-Opens a project's config in $EDITOR, or vi without one. The name may be the project's id.
+Opens a project's config in $EDITOR, or vi without one. The name may be the project's id. When the
+editor closes the config is loaded again, and what keeps it from loading is shown, with the file
+kept as it was left.
 `,
 	"setup": `mingo setup <project>
 
 Makes what each role needs on this machine, leaving what is there as it is:
-  the clone, cloned from the project's repo with gh, then the role's .env from .env.example when
-  the project has port offsets, and the new clone marked as trusted in ~/.claude.json
+  the clone, cloned from the project's repo with gh
+  the clone marked as trusted in ~/.claude.json, then the role's .env from .env.example when the
+  project has port offsets, or the offset line set in the .env it has, for a clone that was there
+  before too
   the memory folder, with a MEMORY.md that points at handoff-<role>.md, and the pointer put first
   in a MEMORY.md that lacks it
 
-Cloning needs gh logged in and a git identity.
+Cloning needs gh and git installed, gh logged in and a git identity.
 `,
 	"service": `mingo service enable|disable <project>
 
 enable starts the project's autostart roles at boot from now on, through the systemd user unit
-mingo@<project>, while lingering is on for the user. On a Mac it is at login, through the launch
-agent mingo.<project>. It starts nothing now. disable undoes it. Stopping the unit stops this
-project's sessions and no other's.
+mingo@<project>, while lingering is on for the user, and says whether it is. Without lingering they
+start when the user logs in, and loginctl enable-linger turns it on. On a Mac it is at login,
+through the launch agent mingo.<project>. It starts nothing now. disable undoes it and says so.
+Stopping the unit stops this project's sessions and no other's.
 `,
 	"apply": `mingo apply <project>
 
@@ -251,7 +262,8 @@ Sets up this machine for mingo, and changes nothing when run again:
   copies this binary to ~/.local/bin/mingo
   writes ~/.tmux.conf when there is none
   adds the guards, deny rules for pkill and killall, and the settings sessions message each other
-  with to ~/.claude/settings.json, keeping every other key
+  with to ~/.claude/settings.json, keeping every other key, and prints each key it changed with its
+  old and new value. A settings.json that is a link is written where the link points.
 `,
 	"heavy": `mingo heavy <label> -- <command...>
 
@@ -291,7 +303,8 @@ answers this.
 `,
 	"help": `mingo help [command]
 
-Explains a command, or lists them all with no command. mingo <command> --help does the same.
+Explains a command, or lists them all with no command. --help or -h among a command's arguments
+does the same, before any --.
 `,
 	"loop": `mingo loop <project> <role>
 

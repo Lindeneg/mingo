@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Lindeneg/mingo"
@@ -74,6 +76,98 @@ func isHelp(arg string) bool {
 	return arg == "--help" || arg == "-h"
 }
 
+// a help flag before any -- asks for the command's page, what follows -- is the command's own
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if isHelp(a) {
+			return true
+		}
+	}
+	return false
+}
+
+func known(command string) bool {
+	_, ok := pages[command]
+	return command == "new" || ok && !strings.Contains(command, " ")
+}
+
+// a command line mingo cannot take, which exits 2 with the usage of the command its words name
+type usageError struct {
+	problem string
+	words   []string
+}
+
+func (u usageError) Error() string {
+	return u.problem
+}
+
+func badUsage(problem string, words ...string) error {
+	return usageError{problem: problem, words: words}
+}
+
+func (e *env) usage(words []string) {
+	text, _ := e.page(words)
+	head, _, _ := strings.Cut(text, "\n\n")
+	for i, line := range strings.Split(head, "\n") {
+		prefix := "usage: "
+		if i > 0 {
+			prefix = "       "
+		}
+		fmt.Fprintln(e.err, prefix+line)
+	}
+}
+
+func extra(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = strconv.Quote(a)
+	}
+	if len(quoted) == 1 {
+		return "extra argument " + quoted[0]
+	}
+	return "extra arguments " + strings.Join(quoted, " ")
+}
+
+// no flag and at most n arguments, any number when n is negative
+func takes(args []string, n int, words ...string) error {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return badUsage(fmt.Sprintf("unknown flag %q", a), words...)
+		}
+	}
+	if n >= 0 && len(args) > n {
+		return badUsage(extra(args[n:]), words...)
+	}
+	return nil
+}
+
+func exactlyOne(args []string, words ...string) error {
+	if len(args) == 0 {
+		return badUsage("", words...)
+	}
+	return takes(args, 1, words...)
+}
+
+// a subcommand of actions, then exactly one argument
+func subcommand(args []string, command string, actions ...string) error {
+	if len(args) == 0 {
+		return badUsage("", command)
+	}
+	if !slices.Contains(actions, args[0]) {
+		return badUsage(fmt.Sprintf("unknown command %q", command+" "+args[0]), command)
+	}
+	return exactlyOne(args[1:], command, args[0])
+}
+
+// the most arguments of each command that takes no flag and leaves its arguments to this check
+var most = map[string]int{
+	"ls": 0, "agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
+	"repo": 1, "default": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
+}
+
 var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
 
 type exitError int
@@ -104,11 +198,20 @@ func Main(args []string) int {
 	e := &env{out: os.Stdout, err: os.Stderr, host: host.New()}
 	err := e.dispatch(args)
 	var code exitError
+	var bad usageError
 	switch {
 	case err == nil:
 		return 0
 	case errors.As(err, &code):
 		return int(code)
+	case errors.As(err, &bad):
+		if bad.problem != "" {
+			fmt.Fprintf(e.err, "mingo: %s\n", bad.problem)
+		}
+		if len(bad.words) > 0 {
+			e.usage(bad.words)
+		}
+		return 2
 	default:
 		fmt.Fprintf(e.err, "mingo: %v\n", err)
 		return 1
@@ -120,11 +223,23 @@ func (e *env) dispatch(args []string) error {
 	if len(args) > 0 {
 		command, args = args[0], args[1:]
 	}
-	if len(args) > 0 && isHelp(args[0]) {
-		return e.help([]string{command})
+	if isHelp(command) {
+		return e.help(args)
 	}
-	if withSubcommands[command] && len(args) > 1 && isHelp(args[1]) {
-		return e.help([]string{command, args[0]})
+	if !known(command) {
+		return badUsage(fmt.Sprintf("unknown command %q, mingo help lists them", command))
+	}
+	if wantsHelp(args) {
+		words := []string{command}
+		if withSubcommands[command] && !isHelp(args[0]) {
+			words = append(words, args[0])
+		}
+		return e.help(words)
+	}
+	if n, ok := most[command]; ok {
+		if err := takes(args, n, command); err != nil {
+			return err
+		}
 	}
 	arg := func(i int) string {
 		if i < len(args) {
@@ -164,10 +279,16 @@ func (e *env) dispatch(args []string) error {
 	case "default":
 		return e.setDefault(args)
 	case "project":
+		if err := subcommand(args, "project", "add", "show", "edit"); err != nil {
+			return err
+		}
 		return e.project(arg(0), arg(1))
 	case "setup":
 		return e.setup(arg(0))
 	case "service":
+		if err := subcommand(args, "service", "enable", "disable"); err != nil {
+			return err
+		}
 		return e.service(arg(0), arg(1))
 	case "install":
 		return install.Run(e.out)
@@ -184,30 +305,35 @@ func (e *env) dispatch(args []string) error {
 	case "doctor":
 		return e.doctor(arg(0))
 	case "claude":
+		if err := subcommand(args, "claude", "edit"); err != nil {
+			return err
+		}
 		return e.claude(arg(0), arg(1))
 	case "secret":
+		if err := subcommand(args, "secret", "review"); err != nil {
+			return err
+		}
 		return e.secret(args)
 	case "version":
 		fmt.Fprintf(e.out, "mingo %s\n", mingo.Version())
 		return nil
 	case "loop":
 		if len(args) != 2 {
-			return errors.New("loop <project> <role>")
+			return badUsage("", "loop")
 		}
 		return exitError(loop.Run(args[0], args[1]))
 	case "guard":
 		return e.guard(arg(0))
-	case "help", "-h", "--help":
+	case "help":
 		return e.help(args)
 	default:
-		fmt.Fprint(e.err, usage)
-		return exitError(2)
+		return badUsage(fmt.Sprintf("unknown command %q, mingo help lists them", command))
 	}
 }
 
 func (e *env) heavy(args []string) error {
 	if len(args) < 3 || args[0] == "" || args[1] != "--" {
-		return errors.New("heavy <label> -- <command...>")
+		return badUsage("", "heavy")
 	}
 	return exitError(heavy.Run(args[0], args[2:]))
 }
@@ -220,7 +346,7 @@ func (e *env) guard(kind string) error {
 	case "bash":
 		fmt.Fprint(e.out, guard.Bash(input))
 	default:
-		return errors.New("guard write|bash")
+		return badUsage("", "guard")
 	}
 	return nil
 }

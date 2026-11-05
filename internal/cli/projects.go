@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/Lindeneg/mingo"
@@ -18,7 +19,7 @@ import (
 
 func (e *env) project(action, name string) error {
 	if name == "" {
-		return errors.New("project add|show|edit <name>")
+		return badUsage("", "project")
 	}
 	switch action {
 	case "add":
@@ -54,9 +55,14 @@ func (e *env) project(action, name string) error {
 			_, err = e.out.Write(data)
 			return err
 		}
-		return edit(file)
+		if err := edit(file); err != nil {
+			return err
+		}
+		if _, err := config.Load(found); err != nil {
+			return fmt.Errorf("%v, the file is kept as you left it, mingo project edit %s opens it again", err, found)
+		}
 	default:
-		return errors.New("project add|show|edit <name>")
+		return badUsage("", "project")
 	}
 	return nil
 }
@@ -66,23 +72,37 @@ func edit(file string) error {
 	if len(editor) == 0 {
 		editor = []string{"vi"}
 	}
+	if !installed(editor[0]) {
+		return fmt.Errorf("the editor %s is not installed, set EDITOR to one that is", editor[0])
+	}
 	cmd := exec.Command(editor[0], append(editor[1:], file)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s failed: %v", strings.Join(cmd.Args, " "), err)
+	}
+	return nil
 }
 
 func (e *env) setDefault(args []string) error {
 	if len(args) == 0 {
-		name, err := config.DefaultProject()
-		if err != nil {
+		data, err := os.ReadFile(config.DefaultFile())
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
+		}
+		line, _, _ := strings.Cut(string(data), "\n")
+		name := strings.TrimSpace(line)
+		switch {
+		case name == "":
+			return errors.New("no default project is set, mingo default <project> sets one")
+		case !config.Known(name):
+			return fmt.Errorf("the default project is %s, which no longer exists, mingo default <project> sets another", name)
 		}
 		fmt.Fprintln(e.out, name)
 		return nil
 	}
 	p, err := config.Find(args[0])
 	if err != nil {
-		return fmt.Errorf("no project named %s", args[0])
+		return err
 	}
 	if err := os.MkdirAll(config.Dir(), 0o755); err != nil {
 		return err
@@ -131,10 +151,14 @@ func quiet(name string, args ...string) error {
 	return exec.Command(name, args...).Run()
 }
 
+// what the command printed is already on the screen, so its error says only which command failed
 func loud(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s failed: %v", strings.Join(cmd.Args, " "), err)
+	}
+	return nil
 }
 
 func (e *env) setup(spec string) error {
@@ -149,6 +173,12 @@ func (e *env) setup(spec string) error {
 		} else {
 			if p.Repo == "" {
 				return fmt.Errorf("%s names no repo to clone into %s", p.Name, dir)
+			}
+			if !installed("gh") {
+				return errors.New("gh is not installed, see https://cli.github.com")
+			}
+			if !installed("git") {
+				return errors.New("git is not installed, see https://git-scm.com/downloads")
 			}
 			if quiet("gh", "auth", "status") != nil {
 				return errors.New("gh is not logged in, run gh auth login")
@@ -165,17 +195,20 @@ func (e *env) setup(spec string) error {
 			if err := loud("gh", "repo", "clone", p.Repo, dir); err != nil {
 				return err
 			}
-			if err := kit.Ports(p, r, e.out); err != nil {
-				return err
-			}
-			abs, err := filepath.Abs(dir)
-			if err != nil {
-				return err
-			}
+		}
+		// trust comes first, so a clone whose ports fail is still trusted, and both repair a clone made before
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return err
+		}
+		if !install.Trusted(config.Home(), abs) {
 			if err := install.Trust(config.Home(), abs); err != nil {
 				return err
 			}
-			fmt.Fprintf(e.out, "trusted: %s\n", abs)
+		}
+		fmt.Fprintf(e.out, "trusted: %s\n", abs)
+		if err := kit.Ports(p, r, e.out); err != nil {
+			return err
 		}
 		if _, _, err := kit.SeedRole(p, r); err != nil {
 			return err
@@ -187,7 +220,7 @@ func (e *env) setup(spec string) error {
 
 func (e *env) service(action, name string) error {
 	if name == "" {
-		return errors.New("service enable|disable <project>")
+		return badUsage("", "service")
 	}
 	p, err := config.Find(name)
 	if err != nil {
@@ -212,14 +245,45 @@ func (e *env) service(action, name string) error {
 		case runtime.GOOS == "darwin":
 			fmt.Fprintf(e.out, "%s is enabled, but %s names no autostart roles, so nothing starts at login\n", sys.Label(p.Name), p.Name)
 		case len(p.Autostart) > 0:
-			fmt.Fprintf(e.out, "mingo@%s starts %s at boot, while lingering is on for %s\n", p.Name, joinNames(p.Autostart), os.Getenv("USER"))
+			user := os.Getenv("USER")
+			switch lingering() {
+			case "yes":
+				fmt.Fprintf(e.out, "mingo@%s starts %s at boot, as lingering is on for %s\n", p.Name, joinNames(p.Autostart), user)
+			case "no":
+				fmt.Fprintf(e.out, "mingo@%s starts %s when %s logs in, not at boot, as lingering is off for %s\n", p.Name, joinNames(p.Autostart), user, user)
+				fmt.Fprintln(e.out, "loginctl enable-linger turns lingering on, so it starts at boot")
+			default:
+				fmt.Fprintf(e.out, "mingo@%s starts %s at boot while lingering is on for %s\n", p.Name, joinNames(p.Autostart), user)
+				fmt.Fprintln(e.out, "loginctl could not say whether it is, loginctl enable-linger turns it on")
+			}
 		default:
 			fmt.Fprintf(e.out, "mingo@%s is enabled, but %s names no autostart roles, so nothing starts at boot\n", p.Name, p.Name)
 		}
 		return nil
 	case "disable":
-		return sys.ServiceDisable(config.Home(), p.Name)
+		if err := sys.ServiceDisable(config.Home(), p.Name); err != nil {
+			return err
+		}
+		if runtime.GOOS == "darwin" {
+			fmt.Fprintf(e.out, "%s is disabled, so %s's autostart roles no longer start at login\n", sys.Label(p.Name), p.Name)
+		} else {
+			fmt.Fprintf(e.out, "mingo@%s is disabled, so %s's autostart roles no longer start at boot\n", p.Name, p.Name)
+		}
+		return nil
 	default:
-		return errors.New("service enable|disable <project>")
+		return badUsage("", "service")
 	}
+}
+
+// yes or no as loginctl says for this user, or empty when it cannot say
+func lingering() string {
+	out, err := exec.Command("loginctl", "show-user", strconv.Itoa(os.Getuid()), "--property=Linger").Output()
+	if err != nil {
+		return ""
+	}
+	value, ok := strings.CutPrefix(strings.TrimSpace(string(out)), "Linger=")
+	if !ok || value != "yes" && value != "no" {
+		return ""
+	}
+	return value
 }
