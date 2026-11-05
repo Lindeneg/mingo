@@ -77,6 +77,54 @@ func Parse(data []byte) (any, error) {
 	return v, nil
 }
 
+// a key of an object with its value, and the key and value as the file wrote them
+type Member struct {
+	Key   string
+	Value any
+	Text  string
+}
+
+// the members of a top level object in order, each with its text as written, so a file rewritten
+// from them keeps its escapes, numbers and spacing
+func Members(data []byte) ([]Member, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if tok, err := dec.Token(); err != nil {
+		return nil, err
+	} else if tok != json.Delim('{') {
+		return nil, errors.New("not a JSON object")
+	}
+	var out []Member
+	for dec.More() {
+		from := dec.InputOffset()
+		k, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := k.(string)
+		if !ok {
+			return nil, errors.New("a key that is not a string")
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		v, err := Parse(raw)
+		if err != nil {
+			return nil, err
+		}
+		text := strings.TrimLeft(string(data[from:dec.InputOffset()]), " \t\r\n,")
+		out = append(out, Member{Key: key, Value: v, Text: text})
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("trailing data after the JSON value")
+	}
+	return out, nil
+}
+
 func value(dec *json.Decoder) (any, error) {
 	tok, err := dec.Token()
 	if err != nil {

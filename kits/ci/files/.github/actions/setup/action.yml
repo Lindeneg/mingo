@@ -38,7 +38,7 @@ runs:
   using: composite
   steps:
 [[- range .CI.Setup]]
-    - run: [[.]]
+    - run: [[yaml .]]
       shell: bash
 [[- end]]
 [[end]]

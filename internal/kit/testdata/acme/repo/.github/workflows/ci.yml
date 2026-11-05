@@ -62,6 +62,8 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A repository an organization owns needs gitleaks' free license key as this secret.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           # The log and the job summary carry the findings; no comment on the pull request.
           GITLEAKS_ENABLE_COMMENTS: "false"
       - name: Semgrep, community rules

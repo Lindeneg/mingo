@@ -14,29 +14,40 @@ clone, with MINGO_PROJECT set, or after mingo default <project>, the project may
 no role, the project's lead.
 `
 
+// a loop runs on the config it loaded, so the commands that control one reach it without a config
+// that loads
+const asWritten = `
+While a project's config does not load, its running loops go on, and a target written as
+<project>/<role> still reaches the session by those names, the role as written and not as an alias.
+`
+
 var pages = map[string]string{
 	"ls": `mingo ls
 
 Lists every project with its id and repository, then each role with its clone, the lead marked.
+A project whose config does not load shows its error in its place, and ls exits 1.
 `,
 	"agents": `mingo agents [project...]
 
 Shows each role's session: its state, how long it has been up, and its Remote Control link. The
 state is stopped, starting, between (one session has ended and the next has not started), or what
-Claude Code says of the session, such as busy or idle. With no project, every project.
+Claude Code says of the session, such as busy or idle. With no project, every project. A project
+whose config does not load shows its error in its place, and agents exits 1.
 `,
 	"status": `mingo status [project...]
 
 Says of each role whether its session is running, between sessions or not running, and the model
 and effort it runs on or would start on, then the Claude login of this machine. With no project,
-every project.
+every project. A project whose config does not load shows its error in its place, and status
+exits 1.
 `,
 	"start": `mingo start [--autostart] [target...]
 
 Starts a tmux session per role. Each runs the role's loop: Claude Code in the role's clone with the
 project's opener, started again whenever a session ends, so a fresh session goes on from the
 handoff. A project starts every role, a role starts alone, and a role already running is left as
-it is. With no target, the default project.
+it is. With no target, the default project. Every target is checked before any session starts, and
+nothing starts while Claude Code is not installed.
 
   --autostart   a project starts only the roles its autostart names, as the boot service does
 
@@ -50,9 +61,10 @@ this start launches.
 	"stop": `mingo stop [target...]
 
 Asks each session to exit, waits up to 90 seconds for them all, then closes the tmux session of any
-still there. A project stops every role. With no target, the default project. MINGO_STOP_WAIT
-changes the wait, in seconds.
-` + targets,
+still there. A project stops every role. With no target, the default project. Every target is
+checked before any session is asked. MINGO_STOP_WAIT changes the wait, in seconds.
+` + targets + asWritten + `A project whose config does not load stops each role that has run a session on this machine.
+`,
 	"restart": `mingo restart [--force] <target>
 
 Ends a role's session where it stands: the loop types /exit within seconds and starts a fresh
@@ -61,23 +73,23 @@ the fresh one starts from.
 
   --force   for a session a question or a long turn holds: Ctrl+C first, then /exit, and the
             session's process is ended when that does not end it
-` + targets,
+` + targets + asWritten,
 	"attach": `mingo attach <target>
 
 Attaches this terminal to a role's session. Detach with Ctrl+B then D. Ctrl+C reaches the session,
 and twice, or Ctrl+D, ends it.
-` + targets,
+` + targets + asWritten,
 	"ro": `mingo ro <target>
 
 Attaches this terminal to a role's session read only: what is typed does not reach it. Detach with
 Ctrl+B then D.
-` + targets,
+` + targets + asWritten,
 	"peek": `mingo peek <target> [lines]
 
 Prints the last lines of a role's screen, 40 unless lines says otherwise.
 
   mingo peek acme/dev 80
-` + targets,
+` + targets + asWritten,
 	"say": `mingo say <target> <message>
 
 Types the message into a role's session and presses Enter, as if it were typed there. Between two
@@ -85,13 +97,15 @@ sessions nothing is typed, since it would be the next session's first input: try
 seconds.
 
   mingo say acme/dev "pull master"
-` + targets,
+` + targets + asWritten,
 	"clear": `mingo clear
 
 For a session to run as its last tool call: the role's loop ends the session within seconds and
 starts a fresh one, which goes on from the handoff. Write the handoff first, since /exit ends the
 session where it stands. The project and role come from MINGO_PROJECT and MINGO_ROLE, which the
-loop sets, or from the clone the command runs in.
+loop sets, and then the config is not read, so a config that does not load does not stop it. Else
+they come from the clone the command runs in. With no session of the role running, it says so and
+changes nothing.
 `,
 	"path": `mingo path <target>
 
@@ -108,9 +122,10 @@ Prints a project's GitHub repository, as owner/name. With no project, the defaul
 `,
 	"default": `mingo default [project]
 
-Sets the default project, or prints it with no project named. A target that leaves the project out
-takes MINGO_PROJECT first, then the project of the clone the command runs in, then the default,
-then the one project when there is only one.
+Sets the default project, or prints the one set with no project named, and says so when none is
+set or the one set no longer exists. A target that leaves the project out takes MINGO_PROJECT first,
+then the project of the clone the command runs in, then the default, then the one project when there
+is only one.
 `,
 	"project": `mingo project add|show|edit <name>
 
@@ -120,7 +135,9 @@ A project's config, a TOML file in ~/.config/mingo/projects. MINGO_CONFIG moves 
   show   prints the config
   edit   opens the config in $EDITOR, or vi
 
-mingo new makes a project with its clones and files in one go. README.md names every key.
+mingo new makes a project with its clones and files in one go. README.md names every key. A config
+with a key mingo does not know, or a value it cannot use, is refused with the file, the key and the
+value named.
 `,
 	"project add": `mingo project add <name>
 
@@ -133,29 +150,43 @@ Prints a project's config. The name may be the project's id.
 `,
 	"project edit": `mingo project edit <name>
 
-Opens a project's config in $EDITOR, or vi without one. The name may be the project's id.
+Opens a project's config in $EDITOR, or vi without one. The name may be the project's id. When the
+editor closes the config is loaded again, and what keeps it from loading is shown, with the file
+kept as it was left.
 `,
 	"setup": `mingo setup <project>
 
 Makes what each role needs on this machine, leaving what is there as it is:
-  the clone, cloned from the project's repo with gh, then the role's .env from .env.example when
-  the project has port offsets, and the new clone marked as trusted in ~/.claude.json
-  the memory folder, with a MEMORY.md that points at handoff-<role>.md
+  the clone, cloned from the project's repo with gh
+  the clone marked as trusted in ~/.claude.json, then the role's .env from .env.example when the
+  project has port offsets, or the offset line set in the .env it has, for a clone that was there
+  before too
+  the memory folder, with a MEMORY.md that points at handoff-<role>.md, and the pointer put first
+  in a MEMORY.md that lacks it
 
-Cloning needs gh logged in and a git identity.
+Cloning needs gh and git installed, gh logged in and a git identity.
 `,
 	"service": `mingo service enable|disable <project>
 
 enable starts the project's autostart roles at boot from now on, through the systemd user unit
-mingo@<project>, while lingering is on for the user. On a Mac it is at login, through the launch
-agent mingo.<project>. It starts nothing now. disable undoes it. Stopping the unit stops this
-project's sessions and no other's.
+mingo@<project>, while lingering is on for the user, and says whether it is. Without lingering they
+start when the user logs in, and loginctl enable-linger turns it on. On a Mac it is at login,
+through the launch agent mingo.<project>. It starts nothing now. disable undoes it and says so.
+Stopping the unit stops this project's sessions and no other's.
 `,
 	"apply": `mingo apply <project>
 
 Lands the files of the project's modules in its repository through a pull request from the branch
 mingo-kit, or as the first commit of an empty repository, and sets up what the modules need on the
-machine and on GitHub: memory folders, labels, the ruleset, port offsets.
+machine and on GitHub: memory folders, labels, the ruleset on the base branch, and each role's port
+offset in its clone's .env.
+
+Before it changes anything it checks the modules and the files they render, the lead's clone with
+its remote origin and base branch, the lock, the files the repository already has, and with
+claude_files = "local" every clone, so a mistake there changes nothing. Then it sets up the memory
+folders, the port offsets, the ruleset and the labels, in that order, pushes, and writes local
+Claude's files into the clones, with the ruleset after the push on an empty repository. A step that
+fails stops apply there, with the steps before it done, and mingo doctor shows what is still missing.
 
 While the pull request is open, a later apply adds its commit on top, so what was pushed to the
 branch stays. .mingo/kit.lock records each file's module, the mingo version and a hash. A file
@@ -164,6 +195,11 @@ alone, and what mingo renders for it is shown. A file no module renders any more
 it is still as rendered. CLAUDE.md, package.json and .claude/settings.json stay the project's:
 mingo only adds its lines, wraps the heavy scripts, and sets the attribution key. A second apply
 changes nothing.
+
+Until the repository has a package.json, mingo leaves the heavy scripts out, and until a clone has
+an .env or an .env.example, its port offset. On a private repository whose plan has no rulesets,
+which takes GitHub Pro, Team or Enterprise Cloud, it leaves the ruleset out. It says so each time,
+and mingo doctor reports the scripts and the offset as missing and the ruleset as not available.
 
 With claude_files = "local", Claude's files stay out of the repository: CLAUDE.md, made of the text
 mingo claude edit keeps and mingo's lines, the files it imports and .claude go straight into every
@@ -179,7 +215,9 @@ setup comes first.
 Says what of the project's modules is in place and what is missing, with the command that fixes
 each, and the steps only the owner can take, such as the review's token. It reads the base branch,
 so a file waiting in the kit's pull request counts as missing. With claude_files = "local" it reads
-Claude's files in every clone too. It exits 1 while anything is missing.
+Claude's files in every clone too. What it cannot find out, such as the labels while gh is logged
+out, it names with gh's error and counts as neither. It exits 1 while anything is missing or could
+not be checked.
 `,
 	"secret": `mingo secret review <project>
 
@@ -205,7 +243,8 @@ merge and mingo help pr rebase say more.
 	"pr merge": `mingo pr merge <number>
 
 Checks a ready pull request and squash merges it with its branch deleted, only when nothing holds
-it. It holds a pull request:
+it. It first checks that gh is logged in to github.com with the account it uses there, and shows
+what gh says when it is not. It holds a pull request:
   with a required check of [workflow] checks that is not green on the head
   with no review comment on the head that says no findings, from [workflow] reviewer when set
   with an unresolved thread, or a branch behind the base
@@ -214,23 +253,29 @@ it. It holds a pull request:
 Under the ci-unavailable label, the description's record of the local run, the review heading and
 the head's short sha stand in for the checks and the review. It prints every held point, numbered.
 The merge has an empty body, so no commit trailer of the branch reaches the base, and it names the
-shared files the merge touched, for the notice to the others. It never approves, dismisses or
-greens anything.
+shared files the merge touched, for the notice to the others. When the merge went through but
+deleting the branch failed, it says merged and shows gh's error, for the branch to be deleted by
+hand. It never approves, dismisses or greens anything.
 `,
 	"pr rebase": `mingo pr rebase <branch>
 
 Rebases a branch onto the base in a worktree of its own, so the clone it runs in keeps its files,
 and pushes it, only over the head it fetched. A conflict in a shared list of [[workflow.shared]]
 keeps both sides, or takes what one side alone made of an entry. A generated file both sides
-changed is made again by the project's generators. It says whether the base brought code into files
-the branch touches, which asks for the full gate again. Any other conflict stops it with the file
-named and nothing pushed.
+changed is made again by the project's generators. They run in that worktree, a fresh checkout
+without the dependencies installed in the clone, so they must run without them. It says whether
+the base brought code into files the branch touches, which asks for the full gate again. Any other
+conflict stops it with the file named and nothing pushed. Ctrl+C, SIGTERM or SIGHUP stops it at
+once, removes its worktree and exits non-zero.
 `,
 	"gate": `mingo gate <log>
 
 Runs the project's [workflow] gate commands in order, without a shell, with their output in the log,
 and stops at the first red one, exiting 1. One line a command says green or red and how long it
-took. A log path that is not absolute starts at the repository's root.
+took. A command still running after 30 minutes is red, and it is ended with every process it
+started. A log path that is not absolute starts at the repository's root. A gate command with &&,
+a pipe, a redirect or quotes is refused when the config loads: such a line goes in a package script
+or a script file.
 `,
 	"install": `mingo install
 
@@ -238,16 +283,21 @@ Sets up this machine for mingo, and changes nothing when run again:
   copies this binary to ~/.local/bin/mingo
   writes ~/.tmux.conf when there is none
   adds the guards, deny rules for pkill and killall, and the settings sessions message each other
-  with to ~/.claude/settings.json, keeping every other key
+  with to ~/.claude/settings.json, keeping every other key, and prints each key it changed with its
+  old and new value. A settings.json that is a link is written where the link points. A guard an
+  older mingo wrote with mingo's path unquoted is quoted, since sh splits the path at a space.
 `,
 	"heavy": `mingo heavy <label> -- <command...>
 
 Runs a heavy command, such as a check, the tests or a build, in one of the machine's slots, which
-every project shares. It waits while every slot is taken, or while another command holds one and
-less free memory than the least is left, and a command beside another starts only after that one
-has run a while. It says who holds the slots while it waits. A command started by one that holds a
-slot runs at once, a slot whose command died is taken back, and SIGTERM and SIGHUP reach the
-command. The label names the command to the ones that wait.
+every project shares. A command that is not on PATH fails at once, before any wait. It waits while
+every slot is taken, or while another command holds one and less free memory than the least is
+left, and a command beside another starts only after that one has run a while. It says which of
+these it waits for and who holds the slots. A command started by one that holds a slot runs at
+once, and SIGTERM and SIGHUP reach the command. A slot is held while mingo heavy or its command
+runs, so a command that outlives a killed mingo heavy keeps its slot, and a slot whose command died
+is taken back. On Linux the command is sent SIGTERM when mingo heavy is killed. The label names the
+command to the ones that wait.
 
   MINGO_HEAVY_SLOTS        the slots, 2 unless set
   MINGO_HEAVY_MIN_FREE_MB  the least free memory beside another command, 5000 unless set
@@ -263,10 +313,12 @@ The hooks Claude Code runs before a tool call, which mingo install writes into
 ~/.claude/settings.json. Each reads the call on stdin and prints a denial, or nothing.
 
   write   lets Edit, Write and NotebookEdit write only inside the session's project, the temp
-          folder outside mingo's state folder, and its memory and plan folders, by their real paths
+          folder (and /tmp on macOS) outside mingo's state folder, and its memory and plan
+          folders, by their real paths
   bash    denies a Bash or PowerShell command that ends a process by its name: pkill, killall,
-          pgrep or pidof feeding a kill or a loop that kills, taskkill /IM, Stop-Process -Name
-          and their kin, also inside bash -c, eval and a command substitution. It also denies
+          pgrep or pidof by name feeding a kill or a loop that kills, kill given a name, also
+          through xargs or a loop, taskkill /IM, Stop-Process -Name and their kin, also inside
+          bash -c, eval, ssh, sudo and the like, and a command substitution. It also denies
           kill -1, which ends every process.
 
 They are guards against slips, not a sandbox.
@@ -274,16 +326,30 @@ They are guards against slips, not a sandbox.
 	"version": `mingo version
 
 Prints this mingo's version. A loop starts the binary on disk again at each session boundary when it
-answers this.
+answers this and takes the config, as mingo help loop says.
 `,
 	"help": `mingo help [command]
 
-Explains a command, or lists them all with no command. mingo <command> --help does the same.
+Explains a command, or lists them all with no command. --help or -h among a command's arguments
+does the same, before any --.
 `,
 	"loop": `mingo loop <project> <role>
+mingo loop --check <project> <role>
 
 What mingo start runs in each session's pane: Claude Code in the role's clone, started again
-whenever a session ends. It is not for running by hand.
+whenever a session ends. A session that ends within a minute by itself is a failed start, and the
+wait before the next one doubles, up to five minutes. A session that mingo restart or mingo clear
+ended is no failed start. mingo stop ends a loop that waits between sessions within a second.
+
+At each session boundary the loop hands over to the mingo on disk, so a rebuilt mingo takes over,
+but only when that mingo answers mingo version and takes the config. --check asks it: it prints
+what keeps it from running the loop on the config and exits 1, or exits 0. A mingo too old to
+answer --check is not handed over to.
+
+When the project's config does not load, the loop says why in its pane: at its start it tries
+again every few seconds, and at a session boundary it goes on with the config it loaded and tries
+again at the next one. When claude cannot be found, it says so and looks again every few seconds.
+It is not for running by hand.
 `,
 }
 
@@ -297,14 +363,24 @@ func (e *env) newPage() string {
 	b.WriteString(`mingo new <name> --preset <preset> [--<key> <value>]...
 
 Makes a project in one go: writes its config from the preset and the answers, then sets it up as
-mingo setup does and lands its files as mingo apply does. Its repository must exist on GitHub. A
-flag is named after its config key. A terminal is asked for what the flags leave out, and without
-one an answer with no default stops it.
+mingo setup does and lands its files as mingo apply does. Its repository must exist on GitHub, which
+mingo new checks with gh before it writes anything. A flag is named after its config key and is
+given as --key value or --key=value.
 
-  bare   sessions and guards
-  solo   bare with one role, plus workflow, ci and review
-  team   solo with any roles, plus team, tracker, rules and heavy
-  full   every module
+At a terminal mingo new asks for what the flags leave out, with a list to pick from where the
+answers are few, checks each answer as it is given and asks again when it is wrong, then says what
+it will do and asks to continue. Until then Ctrl+C stops it with nothing written. Without a terminal
+the flags and the defaults are all it has, and a wrong or missing answer stops it before it writes
+anything.
+`)
+	for i, p := range kit.Presets {
+		fmt.Fprintf(&b, "\n  %-5s  %s", p, kit.PresetHints[i])
+	}
+	b.WriteString(`
+
+heavy is left out on a stack other than pnpm or npm, or when the repository's default branch has no
+package.json, and each heavy script must be one of its scripts. tracker is left out with the tracker
+none.
 `)
 	k, err := kit.LoadEmbedded()
 	if err != nil {
@@ -330,6 +406,9 @@ one an answer with no default stops it.
 				}
 				if a.List {
 					says += ", separated by commas"
+				}
+				if values := a.Values(); len(values) > 0 {
+					says += ", one of " + strings.Join(values[:len(values)-1], ", ") + " or " + values[len(values)-1]
 				}
 				if a.Default != nil && *a.Default != "" {
 					says += ", " + defaultText(*a.Default)

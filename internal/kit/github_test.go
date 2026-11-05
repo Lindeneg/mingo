@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Lindeneg/mingo/internal/team"
 )
@@ -13,11 +14,15 @@ type fakeGitHub struct {
 	secrets string
 	calls   []string
 	stdin   []string
+	fail    string
 }
 
 func (f *fakeGitHub) run(o team.Options, name string, args ...string) (team.Result, error) {
 	f.calls = append(f.calls, strings.Join(args, " "))
 	f.stdin = append(f.stdin, o.Stdin)
+	if f.fail != "" {
+		return team.Result{Code: 1, Stderr: f.fail}, nil
+	}
 	switch strings.Join(args[:2], " ") {
 	case "label list":
 		return team.Result{Stdout: f.labels}, nil
@@ -80,6 +85,36 @@ func TestTheReviewsTokenIsSetFromWhatWasPastedAndNeverAnEmptyOne(t *testing.T) {
 	}
 	if err := SetReviewSecret(d, "\n"); err == nil || len(f.calls) != 1 {
 		t.Fatal("an empty token was set")
+	}
+}
+
+func TestLabelsMatchWithoutCaseAsOnGitHubAndTheirDescriptionsAreCutByCharacters(t *testing.T) {
+	f := &fakeGitHub{labels: `[{"name":"CI-Unavailable"}]`}
+	d, _ := githubDeps(t, f)
+	if err := makeLabels(d); err != nil || len(f.calls) != 1 {
+		t.Fatal(f.calls, err)
+	}
+	r := &report{}
+	checks["labels"](d, r)
+	if len(r.findings) != 1 || !r.findings[0].ok {
+		t.Fatal(r.findings)
+	}
+	p := project(t, "repo = \"x/demo\"\nmodules = [\"tracker\"]\n[tracker]\nkind = \"github\"\n[[roles]]\nname = \"dev\"\ndoes = \""+strings.Repeat("é", 120)+"\"\n")
+	labels := wantedLabels(Deps{Project: p})
+	if len(labels) != 1 || !utf8.ValidString(labels[0].description) || labels[0].description != strings.Repeat("é", 97)+"..." {
+		t.Fatal(labels)
+	}
+}
+
+func TestDoctorSaysItCouldNotCheckTheTokenWhenGhFails(t *testing.T) {
+	f := &fakeGitHub{fail: "error connecting to api.github.com"}
+	d, _ := githubDeps(t, f)
+	for _, name := range []string{"labels", "review-token"} {
+		r := &report{}
+		checks[name](d, r)
+		if r.missing != 0 || r.unknown != 1 || len(r.findings) != 1 || !strings.HasPrefix(r.findings[0].text, "could not check ") || !strings.HasSuffix(r.findings[0].text, "error connecting to api.github.com") {
+			t.Fatal(name, r.findings)
+		}
 	}
 }
 

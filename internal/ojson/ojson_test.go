@@ -1,6 +1,9 @@
 package ojson
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestKeepsKeyOrderAndFormsLikeJq(t *testing.T) {
 	in := `{"z": 1, "a": {"y": [1, 2.50, "x<y&z"], "b": {}}, "e": [], "n": null, "t": true, "u": "é"}`
@@ -30,6 +33,25 @@ func TestKeepsKeyOrderAndFormsLikeJq(t *testing.T) {
 `
 	if string(out) != want {
 		t.Fatalf("got\n%s", out)
+	}
+}
+
+func TestMembersGivesEachKeyItsValueAndItsTextAsWritten(t *testing.T) {
+	members, err := Members([]byte("{\n    \"a\": \"caf\\u00e9\",\n    \"b\" :[1, 2.50],\r\n\t\"c\":{\"d\": null}\n}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts, keys []string
+	for _, m := range members {
+		texts, keys = append(texts, m.Text), append(keys, m.Key)
+	}
+	if strings.Join(keys, " ") != "a b c" || strings.Join(texts, "|") != "\"a\": \"caf\\u00e9\"|\"b\" :[1, 2.50]|\"c\":{\"d\": null}" || members[0].Value != "café" {
+		t.Fatalf("%q %q", keys, texts)
+	}
+	for _, in := range []string{`[]`, `{"a": 1} x`, `{"a": }`, `"a"`} {
+		if _, err := Members([]byte(in)); err == nil {
+			t.Fatal(in)
+		}
 	}
 }
 

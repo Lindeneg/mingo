@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -36,6 +37,9 @@ type segment struct {
 	argTokens    []token
 	text         string
 	unquotedText string
+	shell        dialect
+	// text a wrapper hands a shell, such as an ssh command, env -S or every way parallel may be read
+	code []string
 }
 
 func wordSet(words ...string) map[string]bool {
@@ -77,11 +81,43 @@ var (
 	}
 	// bash xargs flags are case sensitive, the table above is lowercase for the powershell wrappers
 	xargsValueFlags = wordSet("-I", "-L", "-n", "-P", "-s", "-a", "-d", "-E", "-i", "-l")
-	timedWrappers   = wordSet("timeout", "nice", "watch")
-	blockKeywords   = wordSet("if", "then", "else", "elif", "elseif", "fi", "do", "done", "while", "until", "for", "foreach", "try", "catch", "finally", "!", "&")
-	listers         = wordSet("get-process", "gps", "ps", "pgrep", "pidof")
-	cimListers      = wordSet("get-ciminstance", "gcim", "get-wmiobject", "gwmi")
-	killers         = wordSet("stop-process", "spps", "kill", "taskkill", "pkill", "killall")
+	// more commands bash runs one of their arguments through, with their flags that take a value, case sensitive
+	bashWrapperValueFlags = map[string][]string{
+		"setsid":  {},
+		"stdbuf":  {"-i", "-o", "-e", "--input", "--output", "--error"},
+		"chrt":    {"-T", "-P", "-D", "--sched-runtime", "--sched-period", "--sched-deadline"},
+		"taskset": {},
+		"busybox": {},
+		"sshpass": {"-p", "-f", "-d", "-P"},
+		"ssh":     {},
+		"autossh": {},
+		"parallel": {"-a", "-C", "-d", "-E", "-I", "-j", "-J", "-L", "-l", "-n", "-N", "-P", "-s", "-S",
+			"--arg-file", "--arg-file-sep", "--arg-sep", "--basefile", "--bf", "--block", "--colsep", "--delay",
+			"--delimiter", "--env", "--eof", "--halt", "--header", "--jobs", "--joblog", "--load", "--max-args",
+			"--max-chars", "--max-lines", "--max-procs", "--memfree", "--nice", "--profile", "--recend",
+			"--recstart", "--replace", "--results", "--retries", "--return", "--rpl", "--slf", "--sshdelay",
+			"--sshlogin", "--sshloginfile", "--tagstring", "--termseq", "--tf", "--timeout", "--tmpdir",
+			"--transferfile", "--trc", "--wd", "--workdir"},
+	}
+	// ssh takes its flags in clusters such as -tt or -p22, the letters that take a value and those that do not
+	shortFlagLetters = map[string][2]string{
+		"ssh":     {"BbcDEeFIiJLlmOoPpQRSWw", "46AaCfGgKkMNnqsTtVvXxYy"},
+		"autossh": {"BbcDEeFIiJLlmOoPpQRSWwM", "46AaCfGgKkMNnqsTtVvXxYy"},
+	}
+	// the words a wrapper takes before its command, the cpu mask of taskset, the priority of chrt, the host of ssh
+	wrapperPositionals = map[string]int{"chrt": 1, "taskset": 1, "ssh": 1, "autossh": 1}
+	remoteShells       = wordSet("ssh", "autossh")
+	parallelSeparators = wordSet(":::", ":::+", "::::", "::::+")
+	// powershell calls a kill method by name through these, as in Invoke-CimMethod -MethodName Terminate
+	psMethodCallers   = wordSet("invoke-cimmethod", "icim", "invoke-wmimethod", "iwmi")
+	declarers         = wordSet("export", "local", "declare", "readonly", "typeset")
+	sshCommandOptions = []string{"proxycommand", "localcommand", "remotecommand", "knownhostscommand"}
+
+	timedWrappers = wordSet("timeout", "nice", "watch")
+	blockKeywords = wordSet("if", "then", "else", "elif", "elseif", "fi", "do", "done", "while", "until", "for", "foreach", "try", "catch", "finally", "!", "&")
+	listers       = wordSet("get-process", "gps", "ps", "pgrep", "pidof")
+	cimListers    = wordSet("get-ciminstance", "gcim", "get-wmiobject", "gwmi")
+	killers       = wordSet("stop-process", "spps", "kill", "taskkill", "pkill", "killall")
 )
 
 // every unicode space splits words, not only a shell's, so an odd space cannot hide a word
@@ -115,6 +151,8 @@ var (
 	wmicProcessRe      = regexp.MustCompile(`(?i)\bprocess\b`)
 	wmicEndRe          = regexp.MustCompile(`(?i)\b(delete|terminate)\b`)
 	killNameRe         = regexp.MustCompile(`^[A-Za-z][\w.-]*$`)
+	echoFlagRe         = regexp.MustCompile(`^-[neE]+$`)
+	printfFormatRe     = regexp.MustCompile(`\\[nrtv]|%[-+ #0-9.]*[a-zA-Z%]`)
 	listerWordRe       = regexp.MustCompile(`\b(pgrep|pidof)\b`)
 	killWordRe         = regexp.MustCompile(`\b(kill|stop-process|spps|taskkill)\b`)
 	encodedFlagRe      = regexp.MustCompile(`^-(encodedcommand|enc|ec|e)$`)
@@ -160,8 +198,12 @@ func check(source string, d dialect, depth int) string {
 	if d != powershellDialect && listsIntoKillingLoop(statements, d, depth) {
 		return killReason
 	}
+	names := map[string]bool{}
+	if d != powershellDialect {
+		names = namedVariables(statements)
+	}
 	for _, st := range statements {
-		if reason := checkKillRules(st, d, depth); reason != "" {
+		if reason := checkKillRules(st, d, depth, names); reason != "" {
 			return reason
 		}
 		for _, body := range nestedBodies(st.raw, d) {
@@ -303,18 +345,31 @@ func parse(source string, d dialect) []statement {
 	var tokens []token
 	var buffer []rune
 	var quote rune
+	var lastRedirect rune
 	quoted := false
+	// a redirect and the file it names are no words of the command
+	redirect, redirectTarget := false, false
+	piped := false
 	start := 0
 
 	endToken := func() {
 		if len(buffer) > 0 || quoted {
-			tokens = append(tokens, token{string(buffer), quoted})
+			switch {
+			case redirect:
+				redirectTarget = wantsTarget(string(buffer))
+			case redirectTarget:
+				redirectTarget = false
+			default:
+				tokens = append(tokens, token{string(buffer), quoted})
+			}
 		}
 		buffer = buffer[:0]
 		quoted = false
+		redirect = false
 	}
 	endSegment := func() {
 		endToken()
+		redirectTarget = false
 		if len(tokens) > 0 {
 			pipeline = append(pipeline, tokens)
 		}
@@ -322,6 +377,7 @@ func parse(source string, d dialect) []statement {
 	}
 	endStatement := func(end int) {
 		endSegment()
+		piped = false
 		if len(pipeline) > 0 {
 			statements = append(statements, statement{pipeline, string(src[start:end])})
 		}
@@ -335,13 +391,20 @@ func parse(source string, d dialect) []statement {
 		if hasNext {
 			next = src[i+1]
 		}
+		afterRedirect := lastRedirect
+		lastRedirect = 0
 		if quote != 0 {
-			if ch == escape && quote == '"' && hasNext && (ps || strings.ContainsRune("$`\"\\\n", next)) {
+			switch {
+			case ch == escape && quote == '"' && hasNext && (ps || strings.ContainsRune("$`\"\\\n", next)):
 				buffer = append(buffer, next)
 				i++
-			} else if ch == quote {
+			case ch == quote:
 				quote = 0
-			} else {
+			case !ps && quote == '"' && opensExpansion(src, i):
+				end := expansionEnd(src, i)
+				buffer = append(buffer, src[i:end+1]...)
+				i = end
+			default:
 				buffer = append(buffer, ch)
 			}
 			continue
@@ -355,23 +418,151 @@ func parse(source string, d dialect) []statement {
 				buffer = append(buffer, next)
 			}
 			i++
+		case !ps && ch == '#' && len(buffer) == 0 && !quoted && (i == 0 || strings.ContainsRune(" \t\n;&|", src[i-1])):
+			// a comment runs to the end of its line and starts only where bash starts a word
+			for ; i < len(src) && src[i] != '\n'; i++ {
+				src[i] = ' '
+			}
+			i--
+		case !ps && opensExpansion(src, i):
+			// a substitution is one word with whatever spaces, lines and quotes it holds
+			end := expansionEnd(src, i)
+			buffer = append(buffer, src[i:end+1]...)
+			i = end
+		case !ps && ch == '(' && redirect && len(buffer) == 1:
+			// <( and >( are a process substitution, a word and no redirect
+			redirect = false
+			end := expansionEnd(src, i)
+			buffer = append(buffer, src[i:end+1]...)
+			i = end
+		case !ps && ch == '<' && strings.HasPrefix(string(src[i:min(i+3, len(src))]), "<<<"):
+			// a here string's text is read like an argument
+			if len(buffer) > 0 && !redirect {
+				endToken()
+			}
+			buffer = append(buffer, '<', '<', '<')
+			i += 2
+		case !ps && ((ch == '&' && afterRedirect != 0) || (ch == '|' && afterRedirect == '>')):
+			// the & of 2>&1 and <&3 and the | of >| belong to the redirect
+			buffer = append(buffer, ch)
+		case !ps && ch == '&' && next == '>':
+			// &> sends both streams to a file and starts a word of its own
+			endToken()
+			redirect = true
+			buffer = append(buffer, ch)
+		case !ps && ch == '|' && next == '&':
+			// |& pipes both streams
+			endSegment()
+			piped = true
+			i++
 		case (ch == '|' || ch == '&') && hasNext && next == ch:
 			endStatement(i)
 			i++
 			start = i + 1
 		case ch == '|':
 			endSegment()
+			piped = !ps
+		case ch == '\n' && piped && len(tokens) == 0 && len(buffer) == 0 && !quoted:
+			// a pipe at the end of a line goes on to the next one
 		case ch == ';' || ch == '\n' || (ch == '&' && !ps):
 			endStatement(i)
 			start = i + 1
 		case isJSSpace(ch):
 			endToken()
 		default:
+			if !ps && (ch == '>' || ch == '<') {
+				// a redirect glued to a word is no part of it, unless the word is the number of a stream
+				if !redirect {
+					if len(buffer) > 0 && (quoted || !digitsRe.MatchString(string(buffer))) {
+						endToken()
+					}
+					redirect = true
+				}
+				lastRedirect = ch
+			}
 			buffer = append(buffer, ch)
 		}
 	}
 	endStatement(len(src))
 	return statements
+}
+
+// a redirect written apart from its file, such as > out.log, takes the next word as that file
+func wantsTarget(redirect string) bool {
+	op := strings.TrimLeft(redirect, "0123456789")
+	for _, o := range []string{"&>>", "&>", "<<-", "<<", "<>", "<&", ">&", ">>", ">|", "<", ">"} {
+		if strings.HasPrefix(op, o) {
+			return op == o
+		}
+	}
+	return false
+}
+
+func opensExpansion(src []rune, i int) bool {
+	return src[i] == '`' || (src[i] == '$' && i+1 < len(src) && (src[i+1] == '(' || src[i+1] == '{'))
+}
+
+// the index that closes the $( ${ ( or backtick opening at i, or the last index when nothing does
+func expansionEnd(src []rune, i int) int {
+	switch {
+	case src[i] == '`':
+		for j := i + 1; j < len(src); j++ {
+			if src[j] == '\\' {
+				j++
+			} else if src[j] == '`' {
+				return j
+			}
+		}
+		return len(src) - 1
+	case src[i] == '$' && src[i+1] == '{':
+		return closingIndex(src, i+1, '{', '}')
+	case src[i] == '$':
+		return closingIndex(src, i+1, '(', ')')
+	}
+	return closingIndex(src, i, '(', ')')
+}
+
+func closingIndex(src []rune, open int, left, right rune) int {
+	depth := 0
+	for j := open; j < len(src); j++ {
+		switch c := src[j]; {
+		case c == '\\':
+			j++
+		case c == '\'':
+			for j++; j < len(src) && src[j] != '\''; j++ {
+			}
+		case c == '"':
+			j = doubleQuoteEnd(src, j)
+		case opensExpansion(src, j):
+			j = expansionEnd(src, j)
+		case c == '#' && left == '(' && j > open && strings.ContainsRune(" \t\n;&|(", src[j-1]):
+			for j+1 < len(src) && src[j+1] != '\n' {
+				j++
+			}
+		case c == left:
+			depth++
+		case c == right:
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return len(src) - 1
+}
+
+func doubleQuoteEnd(src []rune, open int) int {
+	for k := open + 1; k < len(src); k++ {
+		switch c := src[k]; {
+		case c == '\\':
+			k++
+		case c == '"':
+			return k
+		case opensExpansion(src, k):
+			k = expansionEnd(src, k)
+		}
+	}
+	return len(src) - 1
 }
 
 // the bodies of $(...), (...) and bash backticks, where inside double quotes plain parentheses are data
@@ -470,7 +661,7 @@ func isFlag(word string) bool {
 	return strings.HasPrefix(word, "-") || slashFlagRe.MatchString(word)
 }
 
-func splitBlocks(tokens []token) [][]token {
+func splitBlocks(tokens []token, d dialect) [][]token {
 	var parts [][]token
 	var current []token
 	for _, t := range tokens {
@@ -480,7 +671,8 @@ func splitBlocks(tokens []token) [][]token {
 				parts = append(parts, current)
 			}
 			current = nil
-		case !t.quoted && len(t.text) > 1 && strings.HasPrefix(t.text, "{"):
+		// in bash {} is a word, as xargs -I{} and parallel take it
+		case !t.quoted && len(t.text) > 1 && strings.HasPrefix(t.text, "{") && !(d == bashDialect && t.text == "{}"):
 			if len(current) > 0 {
 				parts = append(parts, current)
 			}
@@ -505,6 +697,7 @@ func takesValue(wrapper, flag string, d dialect) bool {
 // the command word and its arguments once assignments, block keywords and wrappers are skipped
 func inspect(tokens []token, d dialect) (segment, bool) {
 	i := 0
+	var code []string
 	for steps := 0; steps < 16 && i < len(tokens); steps++ {
 		t := tokens[i]
 		name := basename(t.text)
@@ -513,15 +706,46 @@ func inspect(tokens []token, d dialect) (segment, bool) {
 			continue
 		}
 		if _, ok := wrapperValueFlags[name]; ok {
-			i = skipWrapperFlags(tokens, i+1, name, d)
+			if name == "command" && d == bashDialect && describesOnly(tokens[i+1:]) {
+				break
+			}
+			from := i + 1
+			i = skipWrapperFlags(tokens, from, name, d)
+			if name == "env" && d == bashDialect {
+				code = append(code, flagValues(tokens[from:min(i, len(tokens))], "-S", "--split-string")...)
+			}
+			continue
+		}
+		if _, ok := bashWrapperValueFlags[name]; ok && d == bashDialect {
+			from := i + 1
+			var unsure bool
+			i, unsure = skipBashWrapper(tokens, from, name)
+			if remoteShells[name] {
+				code = append(code, sshOptionCommands(tokens[from:min(i, len(tokens))])...)
+				if i < len(tokens) {
+					code = append(code, joinTexts(tokens[i:]))
+				}
+			}
+			// a flag the guard does not know may take the next word, so every word that could start the command is read as one
+			if unsure || name == "parallel" {
+				for c := from; c < min(len(tokens), from+32) && !parallelSeparators[tokens[c].text]; c++ {
+					if !isFlag(tokens[c].text) {
+						code = append(code, joinTexts(tokens[c:]))
+					}
+				}
+			}
 			continue
 		}
 		break
 	}
 	if i >= len(tokens) {
-		return segment{}, false
+		return segment{code: code, shell: d}, len(code) > 0
 	}
-	s := segment{cmd: basename(tokens[i].text), argTokens: tokens[i+1:]}
+	if d == bashDialect && tokens[i].quoted && strings.ContainsAny(tokens[i].text, " \t\n;|&") {
+		// a quoted command with spaces, as watch or parallel take it, is read as the shell would read it
+		code = append(code, joinTexts(tokens[i:]))
+	}
+	s := segment{cmd: basename(tokens[i].text), argTokens: tokens[i+1:], shell: d, code: code}
 	var all, unquoted []string
 	for _, t := range tokens {
 		all = append(all, t.text)
@@ -537,10 +761,112 @@ func inspect(tokens []token, d dialect) (segment, bool) {
 	return s, true
 }
 
+// command -v and -V say what a name is and run nothing
+func describesOnly(tokens []token) bool {
+	for _, t := range tokens {
+		if t.quoted || !strings.HasPrefix(t.text, "-") || t.text == "--" || t.text == "-" {
+			return false
+		}
+		if strings.ContainsAny(t.text[1:], "vV") {
+			return true
+		}
+	}
+	return false
+}
+
+func joinTexts(tokens []token) string {
+	texts := make([]string, len(tokens))
+	for k, t := range tokens {
+		texts[k] = t.text
+	}
+	return strings.Join(texts, " ")
+}
+
+// the values of a flag such as env -S, written -S value, -Svalue or --split-string=value
+func flagValues(tokens []token, short, long string) []string {
+	var values []string
+	for k, t := range tokens {
+		switch {
+		case (t.text == short || t.text == long) && k+1 < len(tokens):
+			values = append(values, tokens[k+1].text)
+		case strings.HasPrefix(t.text, long+"="):
+			values = append(values, strings.TrimPrefix(t.text, long+"="))
+		case len(t.text) > len(short) && strings.HasPrefix(t.text, short) && !strings.HasPrefix(t.text, "--"):
+			values = append(values, strings.TrimPrefix(t.text, short))
+		}
+	}
+	return values
+}
+
+// ssh -o ProxyCommand and its kin run a command of their own
+func sshOptionCommands(tokens []token) []string {
+	var commands []string
+	for _, option := range flagValues(tokens, "-o", "-o") {
+		lower := strings.ToLower(option)
+		for _, name := range sshCommandOptions {
+			if strings.HasPrefix(lower, name) {
+				commands = append(commands, strings.TrimLeft(option[len(name):], " \t="))
+			}
+		}
+	}
+	return commands
+}
+
+// the index of the command a bash wrapper runs, and whether a flag it does not know leaves that unsure
+func skipBashWrapper(tokens []token, i int, wrapper string) (int, bool) {
+	i, unsure := skipBashFlags(tokens, i, wrapper)
+	if n := wrapperPositionals[wrapper]; n > 0 && i < len(tokens) {
+		i += n
+		if remoteShells[wrapper] {
+			// ssh reads flags after the host too
+			var more bool
+			i, more = skipBashFlags(tokens, i, wrapper)
+			unsure = unsure || more
+		}
+	}
+	return i, unsure
+}
+
+func skipBashFlags(tokens []token, i int, wrapper string) (int, bool) {
+	unsure := false
+	values := bashWrapperValueFlags[wrapper]
+	for i < len(tokens) {
+		a := tokens[i].text
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			break
+		}
+		i++
+		if a == "--" {
+			break
+		}
+		if letters, ok := shortFlagLetters[wrapper]; ok && !strings.HasPrefix(a, "--") {
+			for k := 1; k < len(a); k++ {
+				if strings.IndexByte(letters[0], a[k]) >= 0 {
+					if k == len(a)-1 {
+						i++
+					}
+					break
+				}
+				if strings.IndexByte(letters[1], a[k]) < 0 {
+					unsure = true
+				}
+			}
+			continue
+		}
+		flag, _, inline := strings.Cut(a, "=")
+		glued := len(flag) > 2 && flag[1] != '-' && slices.Contains(values, flag[:2])
+		if !inline && !glued && slices.Contains(values, flag) {
+			i++
+		}
+	}
+	return i, unsure
+}
+
 func skipWrapperFlags(tokens []token, i int, wrapper string, d dialect) int {
 	for i < len(tokens) {
 		t := tokens[i]
-		if t.quoted {
+		// bash takes a quoted flag such as --user='root' as the flag
+		if t.quoted && (d != bashDialect || !strings.HasPrefix(t.text, "-")) {
 			break
 		}
 		if isFlag(t.text) {
@@ -563,7 +889,7 @@ func skipWrapperFlags(tokens []token, i int, wrapper string, d dialect) int {
 func segments(st statement, d dialect) []segment {
 	var segs []segment
 	for _, tokens := range st.pipeline {
-		for _, part := range splitBlocks(tokens) {
+		for _, part := range splitBlocks(tokens, d) {
 			if s, ok := inspect(part, d); ok {
 				segs = append(segs, s)
 			}
@@ -580,13 +906,140 @@ func isIDValue(arg string) bool {
 	return digitsRe.MatchString(arg) || strings.HasPrefix(arg, "$") || arg == "{}"
 }
 
+// in bash only the command word can call a kill method, an argument such as grep terminate is data
 func isKiller(s segment) bool {
+	if s.shell == bashDialect {
+		return killers[s.cmd] || methodKillRe.MatchString(s.cmd) || (psMethodCallers[s.cmd] && methodKillRe.MatchString(s.text))
+	}
 	return killers[s.cmd] || methodKillRe.MatchString(s.text)
 }
 
+// a lister, or in bash an echo, printf or here string of a word that is no process id, since kill
+// given a word ends every process of that name
+func listsByName(s segment) bool {
+	return isByNameLister(s) || (s.shell == bashDialect && printsAName(s))
+}
+
+func printsAName(s segment) bool {
+	var words []string
+	switch {
+	case s.cmd == "echo":
+		words = s.args
+		for len(words) > 0 && echoFlagRe.MatchString(words[0]) {
+			words = words[1:]
+		}
+	case s.cmd == "printf":
+		if slices.Contains(s.args, "-v") {
+			return false
+		}
+		words = s.args
+		if len(words) > 0 && words[0] == "--" {
+			words = words[1:]
+		}
+		if len(words) > 1 {
+			words = words[1:]
+		} else if len(words) == 1 {
+			words = []string{printfFormatRe.ReplaceAllString(words[0], " ")}
+		}
+	case strings.HasPrefix(s.cmd, "<<<"):
+		words = append([]string{strings.TrimPrefix(s.cmd, "<<<")}, s.args...)
+	}
+	for _, w := range words {
+		if slices.ContainsFunc(strings.Fields(w), isNameWord) {
+			return true
+		}
+	}
+	return false
+}
+
+// a word kill reads as a name, not a number, a %job, a $variable or a signal
+func isNameWord(w string) bool {
+	return w != "" && !digitsRe.MatchString(w) && !strings.HasPrefix(w, "%") && !strings.HasPrefix(w, "$") && !strings.HasPrefix(w, "-") && w != "{}"
+}
+
+// the top commands of a substitution, where an echo is what feeds the kill, and every lister deeper in
+func bodyListsByName(body string, d dialect, depth int) bool {
+	for _, st := range parse(body, d) {
+		if slices.ContainsFunc(segments(st, d), listsByName) {
+			return true
+		}
+		for _, inner := range nestedBodies(st.raw, d) {
+			if containsByNameLister(inner, d, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isByNameLister(s segment) bool {
-	return (listers[s.cmd] && !slices.ContainsFunc(s.args, isIDParameter)) ||
+	return (listers[s.cmd] && !slices.ContainsFunc(s.args, isIDParameter) && !(s.shell == bashDialect && s.cmd == "pgrep" && listsChildrenOnly(s.args))) ||
 		(cimListers[s.cmd] && win32ProcessRe.MatchString(s.text))
+}
+
+var (
+	pgrepValueFlags = wordSet("--delimiter", "--pgroup", "--group", "--older", "--parent", "--session", "--signal", "--terminal", "--euid", "--uid", "--pidfile", "--runstates", "--cgroup", "--ns", "--nslist")
+	pgrepShortValue = "dgGOPstuUFr"
+)
+
+// pgrep -P picks the children of a process id and no name, unless a pattern narrows it by name,
+// -v turns it into every other process, or the parent is 0 or 1, whose children are every service
+func listsChildrenOnly(args []string) bool {
+	var parents []string
+	value := func(i int, glued string) string {
+		if glued != "" {
+			return glued
+		}
+		if i+1 < len(args) {
+			return args[i+1]
+		}
+		return ""
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			if i != len(args)-1 {
+				return false
+			}
+		case strings.HasPrefix(a, "--"):
+			name, inline, glued := strings.Cut(a, "=")
+			if name == "--inverse" {
+				return false
+			}
+			if name == "--parent" {
+				parents = append(parents, value(i, inline))
+			}
+			if !glued && pgrepValueFlags[name] {
+				i++
+			}
+		case strings.HasPrefix(a, "-") && len(a) > 1:
+			for k := 1; k < len(a); k++ {
+				if a[k] == 'v' {
+					return false
+				}
+				if strings.IndexByte(pgrepShortValue, a[k]) >= 0 {
+					if a[k] == 'P' {
+						parents = append(parents, value(i, a[k+1:]))
+					}
+					if k == len(a)-1 {
+						i++
+					}
+					break
+				}
+			}
+		default:
+			return false
+		}
+	}
+	for _, p := range parents {
+		for _, id := range strings.Split(p, ",") {
+			if n, err := strconv.Atoi(id); id == "" || (err == nil && n <= 1) {
+				return false
+			}
+		}
+	}
+	return len(parents) > 0
 }
 
 func containsByNameLister(text string, d dialect, depth int) bool {
@@ -641,10 +1094,10 @@ func count(words []string, set map[string]bool) int {
 // a loop runs across statements, so a lister that feeds it and a kill in its body meet in no one statement
 func listsIntoKillingLoop(statements []statement, d dialect, depth int) bool {
 	lists := func(st statement) bool {
-		if slices.ContainsFunc(segments(st, d), isByNameLister) {
+		if slices.ContainsFunc(segments(st, d), listsByName) {
 			return true
 		}
-		return slices.ContainsFunc(nestedBodies(st.raw, d), func(body string) bool { return containsByNameLister(body, d, depth) })
+		return slices.ContainsFunc(nestedBodies(st.raw, d), func(body string) bool { return bodyListsByName(body, d, depth) })
 	}
 	done := wordSet("done")
 	for i, header := range statements {
@@ -660,16 +1113,37 @@ func listsIntoKillingLoop(statements []statement, d dialect, depth int) bool {
 				break
 			}
 		}
-		if !lists(header) && !lists(statements[end]) {
+		listed := lists(header) || lists(statements[end])
+		variable, named := forNames(header)
+		if !listed && !named {
 			continue
 		}
 		for _, st := range statements[i+1 : end+1] {
-			if slices.ContainsFunc(segments(st, d), isKiller) {
-				return true
+			for _, s := range segments(st, d) {
+				if isKiller(s) && (listed || killsVariable(s, variable)) {
+					return true
+				}
 			}
 		}
 	}
 	return false
+}
+
+// the variable of a for loop over words, and whether one of those words is a name and no id
+func forNames(header statement) (string, bool) {
+	if len(header.pipeline) == 0 {
+		return "", false
+	}
+	tokens := header.pipeline[0]
+	at := slices.IndexFunc(tokens, func(t token) bool { return !t.quoted && t.text == "for" })
+	if at < 0 || at+2 >= len(tokens) || tokens[at+2].text != "in" {
+		return "", false
+	}
+	return tokens[at+1].text, slices.ContainsFunc(tokens[at+3:], func(t token) bool { return isNameWord(t.text) })
+}
+
+func killsVariable(s segment, variable string) bool {
+	return slices.ContainsFunc(s.args, func(a string) bool { return a == "$"+variable || a == "${"+variable+"}" })
 }
 
 func positionalArgs(args []string) []string {
@@ -708,7 +1182,51 @@ func signalsEveryProcess(args []string) bool {
 	return i < len(args) && slices.Contains(args[i:], "-1")
 }
 
-func checkKillRules(st statement, d dialect, depth int) string {
+// a command the guard does not know as a wrapper, such as strace kill $(pgrep node), still runs
+// the kill it is given, so a kill word beside a lister in a substitution is denied
+func killsWithAListerInItsArguments(s segment, depth int) bool {
+	killWord := slices.ContainsFunc(s.argTokens, func(t token) bool { return !t.quoted && killers[basename(t.text)] })
+	return killWord && slices.ContainsFunc(s.argTokens, func(t token) bool {
+		return !t.quoted && slices.ContainsFunc(nestedBodies(t.text, bashDialect), func(body string) bool {
+			return containsByNameLister(body, bashDialect, depth)
+		})
+	})
+}
+
+func containsKiller(text string, depth int) bool {
+	if depth > 6 {
+		return false
+	}
+	for _, st := range parse(text, bashDialect) {
+		if slices.ContainsFunc(segments(st, bashDialect), isKiller) {
+			return true
+		}
+		if slices.ContainsFunc(nestedBodies(st.raw, bashDialect), func(body string) bool { return containsKiller(body, depth+1) }) {
+			return true
+		}
+	}
+	return false
+}
+
+// the variables a command sets to a word kill would read as a name, such as n=node
+func namedVariables(statements []statement) map[string]bool {
+	names := map[string]bool{}
+	for _, st := range statements {
+		for _, tokens := range st.pipeline {
+			declares := len(tokens) > 0 && declarers[tokens[0].text]
+			for k, t := range tokens {
+				if !assignmentRe.MatchString(t.text) || (k > 0 && !declares && !assignmentRe.MatchString(tokens[k-1].text)) {
+					continue
+				}
+				name, value, _ := strings.Cut(t.text, "=")
+				names[name] = isNameWord(value) && !strings.ContainsAny(value, "`(")
+			}
+		}
+	}
+	return names
+}
+
+func checkKillRules(st statement, d dialect, depth int, names map[string]bool) string {
 	segs := segments(st, d)
 	for k, s := range segs {
 		if s.cmd == "pkill" || s.cmd == "killall" {
@@ -760,23 +1278,40 @@ func checkKillRules(st statement, d dialect, depth int) string {
 				if killNameRe.MatchString(a) && !signalRe.MatchString(a) {
 					return killReason
 				}
+				if v := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(a, "$"), "{"), "}"); strings.HasPrefix(a, "$") && names[v] {
+					return killReason
+				}
 			}
 		}
 		if isByNameLister(s) && methodKillRe.MatchString(s.text) {
 			return killReason
 		}
+		// in bash the rules above already read every command word, and a word in an argument is data
 		lower := strings.ToLower(s.unquotedText)
-		if listerWordRe.MatchString(lower) && killWordRe.MatchString(lower) {
+		if d == powershellDialect && listerWordRe.MatchString(lower) && killWordRe.MatchString(lower) {
 			return killReason
+		}
+		if d == bashDialect && killsWithAListerInItsArguments(s, depth) {
+			return killReason
+		}
+		for _, code := range s.code {
+			if reason := check(code, bashDialect, depth+1); reason != "" {
+				return reason
+			}
 		}
 	}
 	for k, s := range segs {
-		if isByNameLister(s) && slices.ContainsFunc(segs[k+1:], isKiller) {
+		if listsByName(s) && slices.ContainsFunc(segs[k+1:], isKiller) {
 			return killReason
 		}
 	}
 	bodies := nestedBodies(st.raw, d)
-	if slices.ContainsFunc(segs, isKiller) && slices.ContainsFunc(bodies, func(body string) bool { return containsByNameLister(body, d, depth) }) {
+	listed := slices.ContainsFunc(bodies, func(body string) bool { return bodyListsByName(body, d, depth) })
+	if listed && slices.ContainsFunc(segs, isKiller) {
+		return killReason
+	}
+	// tee >(xargs kill) < <(pgrep node) feeds one substitution from another
+	if listed && d == bashDialect && slices.ContainsFunc(bodies, func(body string) bool { return containsKiller(body, depth) }) {
 		return killReason
 	}
 	for k, s := range segs {
@@ -810,6 +1345,9 @@ func checkKillRules(st statement, d dialect, depth int) string {
 		if j < len(a) {
 			for _, t := range a[j:] {
 				if t.text != "<<<" {
+					if d == bashDialect {
+						t.text = strings.TrimPrefix(t.text, "<<<")
+					}
 					rest = append(rest, t)
 				}
 			}

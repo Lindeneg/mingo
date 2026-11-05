@@ -109,6 +109,8 @@ func TestApplyWithLocalClaudeFilesReplacesOrRemovesAClonesFileOnlyWhileItIsAsRen
 
 func TestApplyWithLocalClaudeFilesRefusesARepositoryThatHasOneAndChangesNothing(t *testing.T) {
 	w := localWorld(t)
+	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nsetup = [\"labels\"]\n")}
+	w.config = strings.Replace(w.config, `modules = ["skills"]`, `modules = ["skills", "workflow"]`, 1)
 	os.MkdirAll(filepath.Join(w.lead, ".claude"), 0o755)
 	os.WriteFile(filepath.Join(w.lead, ".claude", "settings.json"), []byte("{}\n"), 0o644)
 	git(t, w.lead, "add", ".claude/settings.json")
@@ -124,6 +126,52 @@ func TestApplyWithLocalClaudeFilesRefusesARepositoryThatHasOneAndChangesNothing(
 	if _, err := os.Stat(filepath.Join(w.helper(), "TEAM.md")); err == nil {
 		t.Fatal("TEAM.md was written")
 	}
+	if len(w.gh) != 0 {
+		t.Fatal("gh was called", w.gh)
+	}
+	for _, role := range []string{"chief", "helper"} {
+		if _, err := os.Stat(w.deps.Project.MemoryDir(role)); err == nil {
+			t.Fatal("the memory of", role, "was made")
+		}
+	}
+}
+
+func TestApplyWithLocalClaudeFilesReadsEveryCloneBeforeItPushesOrWritesAnything(t *testing.T) {
+	w := localWorld(t)
+	os.MkdirAll(filepath.Join(w.helper(), ".claude"), 0o755)
+	os.WriteFile(filepath.Join(w.helper(), ".claude", "settings.json"), []byte("[]\n"), 0o644)
+	err := w.try()
+	if err == nil || err.Error() != "in helper's clone, .claude/settings.json is not a JSON object" {
+		t.Fatal(err)
+	}
+	if exec.Command("git", "-C", w.origin, "rev-parse", "--verify", "--quiet", Branch).Run() == nil {
+		t.Fatal("the kit's branch was pushed")
+	}
+	if _, err := os.Stat(filepath.Join(w.lead, "CLAUDE.md")); err == nil {
+		t.Fatal("chief's CLAUDE.md was written")
+	}
+	if _, err := os.Stat(w.deps.Project.MemoryDir("chief")); err == nil {
+		t.Fatal("the memory was made")
+	}
+}
+
+func TestApplyWithLocalClaudeFilesKeepsThemOutOfGitInAWorktreeToo(t *testing.T) {
+	w := localWorld(t)
+	os.RemoveAll(w.helper())
+	git(t, w.lead, "worktree", "add", "--quiet", "-b", "helper", w.helper())
+	out := w.apply()
+	if !strings.Contains(out, "helper: adds TEAM.md\n") {
+		t.Fatal(out)
+	}
+	if status := git(t, w.helper(), "status", "--porcelain"); status != "" {
+		t.Fatal(status)
+	}
+	if !strings.Contains(read(t, filepath.Join(w.lead, ".git", "info", "exclude")), "/TEAM.md\n") {
+		t.Fatal("the exclude lines are not where git reads them")
+	}
+	if _, err := os.Stat(filepath.Join(w.lead, ".git", "worktrees", "helper", "info", "exclude")); err == nil {
+		t.Fatal("an exclude file git never reads was written")
+	}
 }
 
 func TestApplyWithLocalClaudeFilesNeedsEveryRoleToHaveItsOwnClone(t *testing.T) {
@@ -135,6 +183,8 @@ func TestApplyWithLocalClaudeFilesNeedsEveryRoleToHaveItsOwnClone(t *testing.T) 
 	}
 	git(t, filepath.Dir(w.helper()), "init", "--quiet")
 	os.MkdirAll(w.helper(), 0o755)
+	top, _ := filepath.EvalSymlinks(filepath.Dir(w.helper()))
+	want = "helper's folder " + w.helper() + " is inside the repository " + top + ", not a clone of its own, move it aside and run mingo setup demo"
 	if err := w.try(); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatal(err)
 	}

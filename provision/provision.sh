@@ -171,6 +171,8 @@ fi
 apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin nodejs gh
 systemctl enable --now docker >/dev/null
 usermod -aG docker "$USER_NAME"
+# node 25 and later no longer ship corepack, which pnpm projects install pnpm through
+command -v corepack >/dev/null || npm install -g --silent corepack
 corepack enable
 
 log "Go $GO_VERSION"

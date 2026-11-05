@@ -32,6 +32,15 @@ type Deps struct {
 	Home     string
 }
 
+type gitError struct {
+	command string
+	out     string
+}
+
+func (e *gitError) Error() string {
+	return fmt.Sprintf("git %s failed:\n%s", e.command, team.LastLines(e.out, shownErrors))
+}
+
 func (d Deps) git(dir string, args ...string) (string, error) {
 	r, err := d.Run(team.Options{Dir: dir, Timeout: gitTimeout, Env: []string{"GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true"}}, "git", args...)
 	if err != nil {
@@ -48,7 +57,7 @@ func (d Deps) git(dir string, args ...string) (string, error) {
 		if text == "" {
 			text = r.Stdout
 		}
-		return "", fmt.Errorf("git %s failed:\n%s", args[0], team.LastLines(text, shownErrors))
+		return "", &gitError{command: args[0], out: text}
 	}
 	return r.Stdout, nil
 }
@@ -76,6 +85,7 @@ func (d Deps) gh(dir string, args ...string) (string, error) {
 
 type checkout struct {
 	dir   string
+	url   string
 	empty bool
 	kit   string
 	sha   string
@@ -91,8 +101,13 @@ func refSHA(refs, branch string) string {
 	return ""
 }
 
+// in a clone of a fork gh picks the parent by itself, so each call names the project's repository
 func (d Deps) openKitPR(dir string) (string, error) {
-	out, err := d.gh(dir, "pr", "list", "--head", Branch, "--state", "open", "--json", "url")
+	repo, err := d.repo()
+	if err != nil {
+		return "", err
+	}
+	out, err := d.gh(dir, "pr", "list", "-R", repo, "--head", Branch, "--state", "open", "--json", "url")
 	if err != nil {
 		return "", err
 	}
@@ -112,19 +127,39 @@ func (d Deps) openKitPR(dir string) (string, error) {
 // the open pull request's branch when there is one, so what was pushed to it stays; doctor reads the base
 func (d Deps) checkout(apply bool) (*checkout, func(), error) {
 	p := d.Project
-	lead := p.CloneDir(p.Lead)
+	c, err := d.clone(p.Lead)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mingo works on %s through the lead's clone, and %v", p.Name, err)
+	}
+	lead := c.dir
+	remotes, err := d.git(lead, "remote")
+	if err != nil {
+		return nil, nil, fmt.Errorf("git could not list the remotes of the lead's clone %s\n%v", lead, err)
+	}
+	if !contains(strings.Fields(remotes), "origin") {
+		repo := p.Repo
+		if repo == "" {
+			repo = "the project's repository"
+		}
+		return nil, nil, fmt.Errorf("the lead's clone %s has no remote origin, which mingo works through, add it with git remote add origin and the URL of %s", lead, repo)
+	}
 	url, err := d.git(lead, "remote", "get-url", "origin")
 	if err != nil {
-		return nil, nil, fmt.Errorf("mingo works on %s through the lead's clone %s, run mingo setup %s first", p.Name, lead, p.Name)
+		return nil, nil, fmt.Errorf("git could not read the remote origin of the lead's clone %s\n%v", lead, err)
 	}
 	url = strings.TrimSpace(url)
 	refs, err := d.git(lead, "ls-remote", url)
 	if err != nil {
 		return nil, nil, err
 	}
-	co := &checkout{empty: strings.TrimSpace(refs) == "", sha: refSHA(refs, Branch)}
+	co := &checkout{url: url, empty: strings.TrimSpace(refs) == "", sha: refSHA(refs, Branch)}
 	if !co.empty && refSHA(refs, p.Workflow.Base) == "" {
 		return nil, nil, fmt.Errorf("%s has no branch %s", url, p.Workflow.Base)
+	}
+	if apply && !co.empty {
+		if _, err := d.repo(); err != nil {
+			return nil, nil, err
+		}
 	}
 	branch := p.Workflow.Base
 	if apply && co.sha != "" {
@@ -188,17 +223,11 @@ func (d Deps) diff(root string, s Step) string {
 	return r.Stdout
 }
 
+// everything that can refuse runs before anything changes, here, on GitHub or in a clone
 func Apply(d Deps) error {
 	mods, files, err := d.files()
 	if err != nil {
 		return err
-	}
-	for _, m := range mods {
-		for _, s := range m.Setup {
-			if err := setups[s](d); err != nil {
-				return err
-			}
-		}
 	}
 	clones, err := d.clones()
 	if err != nil {
@@ -217,21 +246,53 @@ func Apply(d Deps) error {
 	if err != nil {
 		return err
 	}
+	_, local, err := d.split(mods, files)
+	if err != nil {
+		return err
+	}
+	plans, err := d.planClones(local, clones)
+	if err != nil {
+		return err
+	}
+	// a ruleset on the base could refuse the push that makes the base, so an empty repository gets it after its first commit
+	later := ""
+	if co.empty {
+		later = "ruleset"
+	}
+	if err := d.setup(mods, func(s string) bool { return s != later }); err != nil {
+		return err
+	}
 	scratch := filepath.Join(filepath.Dir(co.dir), "diff")
 	pushed, err := d.applyRepo(co, lock, steps, scratch)
 	if err != nil {
 		return err
 	}
-	_, local, err := d.split(mods, files)
-	if err != nil {
+	if err := d.setup(mods, func(s string) bool { return s == later }); err != nil {
 		return err
 	}
-	wrote, err := d.applyClones(mods, local, clones, scratch)
+	wrote, err := d.applyClones(mods, plans, scratch)
 	if err != nil {
 		return err
 	}
 	if !pushed && !wrote {
 		fmt.Fprintln(d.Out, "nothing to apply")
+	}
+	return nil
+}
+
+// runs each setup the modules name that pick takes, once, though two modules may name it
+func (d Deps) setup(mods []Module, pick func(name string) bool) error {
+	done := map[string]bool{}
+	for _, m := range mods {
+		for _, s := range m.Setup {
+			if done[s] || !pick(s) {
+				continue
+			}
+			done[s] = true
+			if err := setups[s](d); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -271,6 +332,8 @@ func (d Deps) land(dir, prefix string, steps []Step, scratch string, remove func
 			if s.Old != nil {
 				fmt.Fprintf(d.Out, "%skeeps %s, which no module renders now and the project changed\n", prefix, s.File.Path)
 			}
+		case Absent:
+			fmt.Fprintf(d.Out, "%sleaves out %s, the repository has no %s yet, and mingo doctor reports it until it has\n", prefix, s.What, s.File.Path)
 		}
 	}
 	return written, removed, nil
@@ -305,23 +368,52 @@ func (d Deps) applyRepo(co *checkout, lock *Lock, steps []Step, scratch string) 
 	}
 	base := d.Project.Workflow.Base
 	if co.empty {
-		if _, err := d.git(co.dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+base); err != nil {
+		if err := d.push(co, base, subject); err != nil {
 			return false, err
 		}
 		fmt.Fprintf(d.Out, "the first commit on %s: %s\n", base, subject)
 		return true, nil
 	}
 	if co.kit != "" {
-		if _, err := d.git(co.dir, "push", "--quiet", "origin", "HEAD:refs/heads/"+Branch); err != nil {
-			return false, fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
+		if err := d.push(co, Branch, subject); err != nil {
+			return false, err
 		}
 		fmt.Fprintf(d.Out, "pushed to the open pull request %s\n", co.kit)
 		return true, nil
 	}
-	if _, err := d.git(co.dir, "push", "--quiet", "--force-with-lease=refs/heads/"+Branch+":"+co.sha, "origin", "HEAD:refs/heads/"+Branch); err != nil {
-		return false, fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", Branch, d.Project.Name, err)
+	if err := d.push(co, Branch, subject, "--force-with-lease=refs/heads/"+Branch+":"+co.sha); err != nil {
+		return false, err
 	}
 	return true, d.pullRequest(co.dir, subject, steps)
+}
+
+// pushes the commit to the branch, and says the branch moved only when git refused the push for that
+func (d Deps) push(co *checkout, branch, subject string, flags ...string) error {
+	args := append(append([]string{"push", "--quiet"}, flags...), "origin", "HEAD:refs/heads/"+branch)
+	_, err := d.git(co.dir, args...)
+	if err == nil {
+		return nil
+	}
+	var ge *gitError
+	if errors.As(err, &ge) && moved(ge.out) {
+		return fmt.Errorf("%s moved while mingo applied, run mingo apply %s again\n%v", branch, d.Project.Name, err)
+	}
+	return fmt.Errorf("could not push the commit %q to the branch %s of %s\n%v", subject, branch, co.url, err)
+}
+
+// git's reasons for refusing a push to a branch that has commits the push lacks, which git never translates
+func moved(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "[rejected]") {
+			continue
+		}
+		for _, why := range []string{"(stale info)", "(non-fast-forward)", "(fetch first)"} {
+			if strings.Contains(line, why) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func moduleList(steps []Step, written []string) string {
@@ -359,7 +451,11 @@ func (d Deps) pullRequest(dir, subject string, steps []Step) error {
 			}
 		}
 	}
-	out, err := d.gh(dir, "pr", "create", "--base", d.Project.Workflow.Base, "--head", Branch, "--title", subject, "--body", body.String())
+	repo, err := d.repo()
+	if err != nil {
+		return err
+	}
+	out, err := d.gh(dir, "pr", "create", "-R", repo, "--base", d.Project.Workflow.Base, "--head", Branch, "--title", subject, "--body", body.String())
 	if err != nil {
 		return err
 	}

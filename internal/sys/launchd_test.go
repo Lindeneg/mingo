@@ -59,7 +59,7 @@ func TestThePlistRunsTheProjectsAgentWithEscapedPaths(t *testing.T) {
 	}
 	want := map[int]string{
 		0: "mingo.demo", 1: "/bin/sh", 2: "-c", 4: "mingo.demo", 5: home + "/.local/bin/mingo", 6: "demo",
-		7: home + "/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+		7: home + "/.local/bin:/opt/homebrew/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
 		8: home + "/Library/Logs/mingo.demo.log", 9: home + "/Library/Logs/mingo.demo.log",
 	}
 	for i, w := range want {

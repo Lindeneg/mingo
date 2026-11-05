@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,8 +43,28 @@ func TestGateAndPrTakeTheProjectOfTheCloneTheyRunIn(t *testing.T) {
 	if r := h.runIn(lead, nil, h.bin, "pr", "rebase", "trunk"); r.code != 1 || r.out != "trunk is never rebased\n" {
 		t.Fatal(r.code, r.out)
 	}
-	if r := h.runIn(lead, nil, h.bin, "pr", "merge"); r.code != 2 || r.out != "usage: mingo pr merge <pull request number>\n" {
+	if r := h.runIn(lead, nil, h.bin, "pr", "merge"); r.code != 2 || r.out != "usage: mingo pr merge <number>\n" {
 		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestPrAndGateShowTheirUsageBeforeLookingForAClone(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"pr"}, "usage: mingo pr merge <number>\n       mingo pr rebase <branch>\n"},
+		{[]string{"pr", "merge"}, "usage: mingo pr merge <number>\n"},
+		{[]string{"pr", "merge", "abc"}, "mingo: \"abc\" is not a pull request number\nusage: mingo pr merge <number>\n"},
+		{[]string{"pr", "rebase", "--onto"}, "mingo: unknown flag \"--onto\"\nusage: mingo pr rebase <branch>\n"},
+		{[]string{"gate"}, "usage: mingo gate <log>\n"},
+		{[]string{"gate", "a.log", "b.log"}, "mingo: extra argument \"b.log\"\nusage: mingo gate <log>\n"},
+	} {
+		if r := h.mingo(c.words...); r.code != 2 || r.out != c.want {
+			t.Fatal(c.words, r.code, r.out)
+		}
 	}
 }
 
@@ -83,19 +104,20 @@ func TestGateAndPrOutsideAProjectsCloneSayWhereToRunThem(t *testing.T) {
 	}
 }
 
-func TestApplyOfABareProjectSeedsTheMemoryAndDoctorSaysWhatIsMissing(t *testing.T) {
+func TestApplyOfABareProjectWhoseFoldersAreNoClonesChangesNothingAndDoctorSaysWhatIsMissing(t *testing.T) {
 	h := newHome(t)
 	h.addDemoWith(`modules = ["guards"]`)
 	r := h.mingo("apply", "demo")
-	memory := filepath.Join(h.home, ".claude", "projects", slug(h.home+"/dev/demo/helper"), "memory", "MEMORY.md")
-	if r.code != 1 || !strings.Contains(r.out, "memory: "+memory+"\n") || !strings.HasSuffix(r.out, "run mingo setup demo first\n") {
+	lead := filepath.Join(h.home, "dev", "demo", "lead")
+	if r.code != 1 || !strings.HasPrefix(r.out, "mingo: mingo works on demo through the lead's clone, and lead's folder "+lead+" is no git clone, move it aside and run mingo setup demo\n") {
 		t.Fatal(r.code, r.out)
 	}
-	if h.read(memory) != "- [Handoff](handoff-helper.md): read first, where the work stands and the next step\n" {
-		t.Fatal(h.read(memory))
+	memory := filepath.Join(h.home, ".claude", "projects", slug(h.home+"/dev/demo/helper"), "memory")
+	if _, err := os.Stat(memory); err == nil {
+		t.Fatal("apply made the memory before it refused")
 	}
 	r = h.mingo("doctor", "demo")
-	if r.code != 1 || !strings.Contains(r.out, "    in place: helper's MEMORY.md pointing at handoff-helper.md\n") ||
+	if r.code != 1 || !strings.Contains(r.out, "    missing: helper's MEMORY.md pointing at handoff-helper.md (mingo setup demo)\n") ||
 		!strings.Contains(r.out, "    missing: the write and kill guards in "+filepath.Join(h.home, ".claude", "settings.json")+" (mingo install)\n") {
 		t.Fatal(r.code, r.out)
 	}
@@ -113,6 +135,8 @@ echo "$*" >>"$state/calls"
 list() { [ -s "$state/$1" ] && sed 's/.*/{"name":"&"}/' "$state/$1" | paste -sd, | sed 's/^/[/;s/$/]/' || echo '[]'; }
 case "$1 $2" in
   "auth status"|"auth setup-git") exit 0 ;;
+  "repo view") [ "$3" = x/demo ] && exit 0; echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1 ;;
+  "api -H") git --git-dir=`+shellQuote(origin)+` show HEAD:package.json 2>/dev/null || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; } ;;
   "repo clone") exec git clone --quiet `+shellQuote(origin)+` "$4" ;;
   "label list") list labels ;;
   "label create") echo "$3" >>"$state/labels" ;;
@@ -242,14 +266,5 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 	}
 	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  Claude's files in dev's clone\n    in place: Claude's files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
 		t.Fatal(r.out)
-	}
-}
-
-func TestNewTakesBackAConfigThatDoesNotLoad(t *testing.T) {
-	h := newHome(t)
-	file := filepath.Join(h.config, "projects", "demo.toml")
-	r := h.mingo("new", "demo", "--preset", "bare", "--repo", "x/demo", "--roles", "Lead")
-	if r.code == 0 || !strings.Contains(r.out, "has a role named Lead") || strings.Contains(r.out, "config: ") || exists(file) {
-		t.Fatal(r.code, r.out)
 	}
 }

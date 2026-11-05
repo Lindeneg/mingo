@@ -223,7 +223,7 @@ func TestNamesMustBeLowercaseWords(t *testing.T) {
 
 func TestProjectWithoutRolesIsRefused(t *testing.T) {
 	setupHome(t)
-	addProject(t, "empty", `repo = "x"`)
+	addProject(t, "empty", `repo = "you/empty"`)
 	_, err := Load("empty")
 	if err == nil || !strings.Contains(err.Error(), "names no roles") {
 		t.Fatal(err)
@@ -385,14 +385,14 @@ func TestTrackerGivesTheClosesLineAndTheTitlesIssueID(t *testing.T) {
 func TestRoleReferencesAndClonesAreCheckedAtLoad(t *testing.T) {
 	setupHome(t)
 	for want, lines := range map[string][]string{
-		"has the role dev twice":                          {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "dev"`},
-		"has the alias d, which is a role's name":         {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "d"`, `aliases = ["d"]`},
-		"has the alias x twice":                           {`[[roles]]`, `name = "a"`, `aliases = ["x"]`, `[[roles]]`, `name = "b"`, `aliases = ["x"]`},
-		"has the alias X Y, use lowercase":                {`[[roles]]`, `name = "a"`, `aliases = ["X Y"]`},
-		"has the lead leed, which is none of its roles":   {`lead = "leed"`, `[[roles]]`, `name = "lead"`},
-		"autostarts nobody, which is none of its roles":   {`autostart = ["nobody"]`, `[[roles]]`, `name = "lead"`},
-		"has 2 roles and one clone for them all":          {`clone = "~/dev/{project}"`, `[[roles]]`, `name = "a"`, `[[roles]]`, `name = "b"`},
-		"has the clone dev/{role}, start it with ~/ or /": {`clone = "dev/{role}"`, `[[roles]]`, `name = "lead"`},
+		"has the role dev twice":                              {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "dev"`},
+		"has the alias d, which is a role's name":             {`[[roles]]`, `name = "dev"`, `[[roles]]`, `name = "d"`, `aliases = ["d"]`},
+		"has the alias x twice":                               {`[[roles]]`, `name = "a"`, `aliases = ["x"]`, `[[roles]]`, `name = "b"`, `aliases = ["x"]`},
+		"has the alias \"X Y\", use lowercase":                {`[[roles]]`, `name = "a"`, `aliases = ["X Y"]`},
+		"has the lead leed, which is none of its roles":       {`lead = "leed"`, `[[roles]]`, `name = "lead"`},
+		"autostarts \"nobody\", which is none of its roles":   {`autostart = ["nobody"]`, `[[roles]]`, `name = "lead"`},
+		"has 2 roles and one clone for them all":              {`clone = "~/dev/{project}"`, `[[roles]]`, `name = "a"`, `[[roles]]`, `name = "b"`},
+		"has the clone \"dev/{role}\", start it with ~/ or /": {`clone = "dev/{role}"`, `[[roles]]`, `name = "lead"`},
 	} {
 		addProject(t, "wrong", lines...)
 		if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), want) {

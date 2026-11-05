@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -110,6 +111,30 @@ type Project struct {
 	Blocks      map[string]map[string]string `toml:"blocks"`
 }
 
+// what the kit has that a config names, the modules and the folders of the kit's own skills
+type KitNames struct {
+	// the modules a config may name
+	Modules []string
+	// the modules always on, which a config does not name
+	Always []string
+	// the folders the kit's own skills take under .claude/skills, which the lead's skill cannot share
+	Skills []string
+}
+
+var kitNames func() (KitNames, error)
+
+// the kit gives what it has at init, read at the first load that needs it, so a config is checked
+// against it then. a program without the kit, such as this package's tests, loads without these checks.
+// it returns what was given before
+func RegisterKit(names func() (KitNames, error)) func() (KitNames, error) {
+	before := kitNames
+	kitNames = nil
+	if names != nil {
+		kitNames = sync.OnceValues(names)
+	}
+	return before
+}
+
 func Load(name string) (*Project, error) {
 	if !IsName(name) {
 		return nil, fmt.Errorf("a project name is lowercase letters, digits and hyphens, not %s", name)
@@ -124,7 +149,16 @@ func Load(name string) (*Project, error) {
 		return nil, fmt.Errorf("%s: %v", file, err)
 	}
 	p.Name, p.File = name, file
+	if err := p.checkKeys(md); err != nil {
+		return nil, err
+	}
+	if err := p.checkSet(md); err != nil {
+		return nil, err
+	}
 	p.Repo = strings.ReplaceAll(p.Repo, "{project}", name)
+	if err := p.checkRepo(); err != nil {
+		return nil, err
+	}
 	if !md.IsDefined("clone") {
 		p.Clone = DefaultClone
 	}
@@ -148,14 +182,20 @@ func Load(name string) (*Project, error) {
 		return nil, fmt.Errorf("%s names no roles", file)
 	}
 	for _, r := range p.Roles {
+		if r.Name == "" {
+			return nil, fmt.Errorf("%s has a role without a name, give each [[roles]] its name", file)
+		}
 		if !IsName(r.Name) {
-			return nil, fmt.Errorf("%s has a role named %s, use lowercase letters, digits and hyphens", file, r.Name)
+			return nil, fmt.Errorf("%s has a role named %q, use lowercase letters, digits and hyphens", file, r.Name)
 		}
 	}
 	if p.Lead == "" {
 		p.Lead = p.Roles[0].Name
 	}
 	if err := p.checkRoles(); err != nil {
+		return nil, err
+	}
+	if err := p.checkKit(); err != nil {
 		return nil, err
 	}
 	if err := p.workflowDefaults(md); err != nil {
@@ -165,6 +205,9 @@ func Load(name string) (*Project, error) {
 		if err := p.checkID(); err != nil {
 			return nil, err
 		}
+	}
+	if err := p.checkSessions(); err != nil {
+		return nil, err
 	}
 	return p, nil
 }
@@ -183,7 +226,7 @@ func (p *Project) checkRoles() error {
 		for _, a := range r.Aliases {
 			switch {
 			case !IsName(a):
-				return fmt.Errorf("%s has the alias %s, use lowercase letters, digits and hyphens", p.File, a)
+				return fmt.Errorf("%s has the alias %q, use lowercase letters, digits and hyphens", p.File, a)
 			case seen[a]:
 				return fmt.Errorf("%s has the alias %s, which is a role's name", p.File, a)
 			case aliases[a]:
@@ -197,14 +240,14 @@ func (p *Project) checkRoles() error {
 	}
 	for _, a := range p.Autostart {
 		if !seen[a] {
-			return fmt.Errorf("%s autostarts %s, which is none of its roles %s", p.File, a, strings.Join(p.RoleNames(), " "))
+			return fmt.Errorf("%s autostarts %q, which is none of its roles %s", p.File, a, strings.Join(p.RoleNames(), " "))
 		}
 	}
 	if len(p.Roles) > 1 && !strings.Contains(p.Clone, "{role}") {
 		return fmt.Errorf("%s has %d roles and one clone for them all, put {role} in clone", p.File, len(p.Roles))
 	}
 	if !filepath.IsAbs(ExpandHome(p.Clone)) {
-		return fmt.Errorf("%s has the clone %s, start it with ~/ or /", p.File, p.Clone)
+		return fmt.Errorf("%s has the clone %q, start it with ~/ or /", p.File, p.Clone)
 	}
 	return nil
 }
@@ -438,17 +481,23 @@ func (p *Project) HoldsDir(dir string) bool {
 	return false
 }
 
+// a project whose config fails to load is still named for a folder in its clones, so the load that
+// follows says what is wrong with it
 func ProjectOfDir(here string) (string, bool) {
+	broken := ""
 	for _, name := range Names() {
 		p, err := Load(name)
 		if err != nil {
+			if broken == "" && clonesHold(name, here) {
+				broken = name
+			}
 			continue
 		}
 		if _, ok := p.RoleOfDir(here); ok {
 			return name, true
 		}
 	}
-	return "", false
+	return broken, broken != ""
 }
 
 func Cwd() string {

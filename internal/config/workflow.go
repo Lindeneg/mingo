@@ -147,6 +147,13 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 	}
 	for i := range w.Shared {
 		s := &w.Shared[i]
+		if strings.TrimSpace(s.Name) == "" {
+			return fmt.Errorf("%s has a [[workflow.shared]] without a name, give it name = \"the route list\" or the like", p.File)
+		}
+		// an empty pattern matches every path, and pr rebase would keep both sides of every conflict
+		if strings.TrimSpace(s.Pattern) == "" {
+			return fmt.Errorf("%s has the shared file %q without a pattern, give it the regexp of its paths, such as pattern = '^src/routes\\.ts$'", p.File, s.Name)
+		}
 		re, err := regexp.Compile(s.Pattern)
 		if err != nil {
 			return fmt.Errorf("%s has a shared file %q whose pattern is no regexp, %v", p.File, s.Name, err)
@@ -158,6 +165,12 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 		if s.Merge != "lines" && s.Merge != "json-keys" && s.Merge != "none" {
 			return fmt.Errorf("%s has a shared file %q merged by %s, use lines, json-keys or none", p.File, s.Name, s.Merge)
 		}
+	}
+	if err := p.checkCommands(); err != nil {
+		return err
+	}
+	if err := p.checkChecks(); err != nil {
+		return err
 	}
 	if !md.IsDefined("review", "read") {
 		p.Review.Read = DefaultRead(p.ClaudeFiles)
@@ -206,7 +219,7 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 	default:
 		return fmt.Errorf("%s has the tracker %s, use linear, github or none", p.File, p.Tracker.Kind)
 	}
-	return nil
+	return p.checkModules()
 }
 
 func (w *Workflow) IsFooter(line string) bool {

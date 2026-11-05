@@ -83,8 +83,10 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 |---|---|
 | bare | sessions and guards |
 | solo | bare with one role, plus workflow, ci and review |
-| team | solo with more roles, plus team, tracker, rules and heavy |
-| full | everything |
+| team | solo with any roles, plus skills, team, tracker, rules, and heavy for Node |
+| full | everything, heavy only for Node |
+
+At a terminal `mingo new` asks for what its flags leave out, checks each answer as it is given, and says what it will do before it writes anything. Without a terminal the flags and the defaults are all it has.
 
 | Module | Gives you |
 |---|---|
@@ -101,6 +103,8 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 | ports | a port offset per role in each clone's `.env` |
 
 The guards catch mistakes, not a session that means to get round them.
+
+On a repository an organization owns, the secret scan of the ci module needs gitleaks' license key, free from [gitleaks.io](https://gitleaks.io), as the repository's secret `GITLEAKS_LICENSE`.
 
 ## A new server
 
@@ -119,7 +123,7 @@ The server sets itself up on the first boot and reboots. Then SSH in as that use
 ```toml
 id = "sh"                          # a short name that works anywhere the project's name does
 title = "Shop"                     # the project's display name, its name by default
-repo = "you/{project}"
+repo = "you/{project}"             # owner/name on GitHub
 clone = "~/dev/{project}/{role}"   # leave {role} out for a project of one role
 lead = "lead"                      # the first role by default
 opener = "You are the {role}. Read your handoff memory, then continue."
@@ -142,20 +146,22 @@ effort = "high"
 does = "codes the issues labelled dev"
 
 [tracker]
-kind = "linear"                    # linear, github or none, the default
+kind = "linear"                    # linear, github or none, none by default, with which the tracker module does nothing
 team = "ENG"                       # the Closes line then names ENG-n
 project = "Shop"
 
 [workflow]
 base = "master"
 ci = "ci"                          # the workflow whose jobs are the checks
-checks = ["check", "test", "build", "security"]
-gate = ["pnpm check", "pnpm test", "pnpm build"]
+checks = ["check", "test", "build", "security"]   # the checks by the names GitHub shows on a pull request, job ids with the ci module, which needs one
+gate = ["pnpm check", "pnpm test", "pnpm build"]  # run without a shell, so no &&, pipes, redirects or quotes
 tags = ["(lead)", "(dev)"]         # the role tags a description starts with
 reviewer = "claude[bot]"           # whose review comments count, anyone's by default
 local_runs = ["pnpm check", "mingo gate"]
-generate_list = ["pnpm exec tsx tools/generate.ts --list"]
-generate = ["pnpm generate"]
+# generate_list names the generated files and generate writes them again, for mingo pr rebase. They
+# run in a fresh checkout without the clone's installed dependencies, so they must run without them
+generate_list = ["node tools/generate.mjs --list"]   # these two without a shell too
+generate = ["node tools/generate.mjs"]
 generated = '^generate: wrote (.+)$'
 # review_line, no_findings, review_heading, footers and trailers tell the review comment and
 # attribution apart, and default to "review:", "no findings", "## Review", Claude Code's footer
@@ -167,11 +173,11 @@ pattern = '^src/routes\.ts$'
 merge = "lines"                    # lines, json-keys or none
 
 [ci]
-stack = "pnpm"                     # pnpm, npm, go or other
+stack = "pnpm"                     # pnpm, npm, go or other, which the ci module needs
 # setup = ["make deps"]            # other only: the commands CI runs before each check
 # audit = "make audit"             # other only: the dependency audit of the security job
 [ci.run]
-check = "pnpm check"               # pnpm <check> or npm run <check> by default
+check = "pnpm check"               # a shell line for one of the checks, pnpm <check> or npm run <check> by default
 
 [review]
 read = "CLAUDE.md first"           # README.md first when claude_files is local
@@ -183,7 +189,7 @@ scripts = ["check", "test", "build", "dev"]   # each moves to <script>:run behin
 
 [ports]
 variable = "APP_PORT_OFFSET"       # the empty line in .env.example that gets the offset
-[ports.offsets]
+[ports.offsets]                    # which the ports module needs
 lead = 10
 dev = 20
 
@@ -191,6 +197,8 @@ dev = 20
 checks = '''
 Run `pnpm check` and the tests of each package the change touches.'''
 ```
+
+mingo checks the config each time it reads it, and refuses a key it does not know, a key set to nothing, and a value it cannot use, naming the file, the key and the value. Two projects whose roles would share a tmux session, such as shop's role `dev-api` and shop-dev's role `api`, are refused too. While a config does not load, its running loops go on with the config they loaded, and `stop`, `restart`, `attach`, `ro`, `peek` and `say` still reach a session written as `<project>/<role>`. `stop <project>` then stops each role that has run a session on this machine.
 
 `MINGO_MODEL_<PROJECT>_<ROLE>` and `MINGO_EFFORT_<PROJECT>_<ROLE>` override a role's model or effort for the sessions a start launches.
 

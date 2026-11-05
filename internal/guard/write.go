@@ -4,16 +4,18 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/Lindeneg/mingo/internal/config"
 )
 
 type WriteEnv struct {
-	ProjectDir string
-	TempDir    string
-	Home       string
-	StateDir   string
+	ProjectDir    string
+	TempDir       string
+	SystemTempDir string
+	Home          string
+	StateDir      string
 }
 
 func WriteEnvFromOS() WriteEnv {
@@ -21,7 +23,12 @@ func WriteEnvFromOS() WriteEnv {
 	if tmp == "" {
 		tmp = "/tmp"
 	}
-	return WriteEnv{ProjectDir: os.Getenv("CLAUDE_PROJECT_DIR"), TempDir: tmp, Home: config.Home(), StateDir: config.StateDir()}
+	env := WriteEnv{ProjectDir: os.Getenv("CLAUDE_PROJECT_DIR"), TempDir: tmp, Home: config.Home(), StateDir: config.StateDir()}
+	// macOS gives each user a TMPDIR of their own, while Claude Code keeps its scratchpad in /tmp
+	if runtime.GOOS == "darwin" {
+		env.SystemTempDir = "/tmp"
+	}
+	return env
 }
 
 func clean(path string) string {
@@ -34,6 +41,11 @@ func clean(path string) string {
 
 // the path with its existing part's symlinks resolved, so a link inside the project cannot lead out
 func resolve(path string) string {
+	return resolveLinks(path, 0)
+}
+
+// a link whose target does not exist yet is judged by that target, since a write through it creates it
+func resolveLinks(path string, hops int) string {
 	for dir := path; ; dir = filepath.Dir(dir) {
 		if real, err := filepath.EvalSymlinks(dir); err == nil {
 			rest, err := filepath.Rel(dir, path)
@@ -41,6 +53,17 @@ func resolve(path string) string {
 				return path
 			}
 			return filepath.Join(real, rest)
+		}
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 && hops < 40 {
+			target, err := os.Readlink(dir)
+			rest, relErr := filepath.Rel(dir, path)
+			if err != nil || relErr != nil {
+				return path
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(resolveLinks(filepath.Dir(dir), hops+1), target)
+			}
+			return resolveLinks(filepath.Join(target, rest), hops+1)
 		}
 		if dir == filepath.Dir(dir) {
 			return path
@@ -89,13 +112,17 @@ func Write(input []byte, env WriteEnv) string {
 		return deny("Write only inside your own project. " + target + " is in mingo's state folder, which only mingo writes.")
 	}
 	claudeHome := filepath.Join(env.Home, ".claude")
-	for _, allowed := range []string{
+	allowedDirs := []string{
 		root,
 		tmp,
 		filepath.Join(claudeHome, "projects", config.Slug(root)),
 		filepath.Join(claudeHome, "projects", config.Slug(resolve(root))),
 		filepath.Join(claudeHome, "plans"),
-	} {
+	}
+	if env.SystemTempDir != "" {
+		allowedDirs = append(allowedDirs, clean(env.SystemTempDir))
+	}
+	for _, allowed := range allowedDirs {
 		if within(file, resolve(allowed)) {
 			return ""
 		}

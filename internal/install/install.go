@@ -4,6 +4,7 @@ package install
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/ojson"
@@ -127,26 +130,84 @@ func checkTypes(root *ojson.Object) error {
 	return nil
 }
 
+var errNotObject = errors.New("not a JSON object")
+
+// encoding/json says where the text stops being JSON, which ojson does not keep
+func notJSON(file string, data []byte, err error) error {
+	var syntax *json.SyntaxError
+	if errors.As(json.Unmarshal(data, new(any)), &syntax) {
+		at := min(max(int(syntax.Offset)-1, 0), len(data))
+		before := data[:at]
+		line, column := bytes.Count(before, []byte("\n"))+1, at-bytes.LastIndexByte(before, '\n')
+		return fmt.Errorf("%s is not valid JSON at line %d, column %d (%v), left as it is", file, line, column, syntax)
+	}
+	return fmt.Errorf("%s is not valid JSON (%v), left as it is", file, err)
+}
+
+func shown(v any, ok bool) string {
+	switch t := v.(type) {
+	case nil:
+		if !ok {
+			return "unset"
+		}
+		return "null"
+	case string:
+		return strconv.Quote(t)
+	case *ojson.Object:
+		return "an object"
+	case []any:
+		return "a list"
+	}
+	return fmt.Sprint(v)
+}
+
+// hooks run through sh, so a path with a character sh reads is quoted
+func shellWord(s string) string {
+	plain := s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("/._-+:@,", r))
+	}) < 0
+	if plain {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // keeps every key already there and adds what mingo needs only once
 func MergeSettings(data []byte, home string) ([]byte, []byte, error) {
+	before, after, _, err := mergeSettings(data, home)
+	return before, after, err
+}
+
+// also says what changed, each key with its old and new value
+func mergeSettings(data []byte, home string) ([]byte, []byte, []string, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		data = []byte("{}")
 	}
 	v, err := ojson.Parse(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	root, ok := v.(*ojson.Object)
 	if !ok {
-		return nil, nil, errors.New("not a JSON object")
+		return nil, nil, nil, errNotObject
 	}
 	if err := checkTypes(root); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	before, _ := ojson.Marshal(root)
+	var changes []string
 
-	root.Set("crossSessionInbound", "accept")
-	root.Set("isolatePeerMachines", true)
+	for _, k := range []struct {
+		key  string
+		want any
+	}{{"crossSessionInbound", "accept"}, {"isolatePeerMachines", true}} {
+		old, had := root.Get(k.key)
+		if had && old == k.want {
+			continue
+		}
+		changes = append(changes, fmt.Sprintf("%s was %s, now %s", k.key, shown(old, had), shown(k.want, true)))
+		root.Set(k.key, k.want)
+	}
 
 	perms := root.Child("permissions")
 	deny, _ := perms.Get("deny")
@@ -163,14 +224,23 @@ func MergeSettings(data []byte, home string) ([]byte, []byte, error) {
 		}
 		if !found {
 			list = append(list, rule)
+			changes = append(changes, fmt.Sprintf("permissions.deny gained %q", rule))
 		}
 	}
 	perms.Set("deny", list)
 
-	bin := BinPath(home)
+	bin := shellWord(BinPath(home))
 	guards := []struct{ matcher, command, status string }{
 		{"Edit|Write|NotebookEdit", bin + " guard write", "Checking the path is inside this project"},
 		{"Bash|PowerShell", bin + " guard bash", "Checking the command ends no process by its name"},
+	}
+	// an older mingo wrote the path unquoted, which sh splits at a space in the home folder, so that
+	// guard fails on every tool call until it is quoted
+	unquoted := map[string]string{}
+	if bin != BinPath(home) {
+		for _, g := range guards {
+			unquoted[BinPath(home)+strings.TrimPrefix(g.command, bin)] = g.command
+		}
 	}
 	hooks := root.Child("hooks")
 	pre, _ := hooks.Get("PreToolUse")
@@ -196,15 +266,75 @@ func MergeSettings(data []byte, home string) ([]byte, []byte, error) {
 			has[s] = true
 		}
 	}
+	for i := 0; i < len(entries); i++ {
+		obj, ok := entries[i].(*ojson.Object)
+		if !ok {
+			continue
+		}
+		inner, _ := obj.Get("hooks")
+		list, ok := inner.([]any)
+		if !ok {
+			continue
+		}
+		var kept []any
+		for _, h := range list {
+			s := ""
+			hobj, isObject := h.(*ojson.Object)
+			if isObject {
+				cmd, _ := hobj.Get("command")
+				s, _ = cmd.(string)
+			}
+			quoted, old := unquoted[s]
+			switch {
+			case !old:
+				kept = append(kept, h)
+			case has[quoted]:
+				changes = append(changes, fmt.Sprintf("hooks.PreToolUse lost %q, the same guard as %q", s, quoted))
+			default:
+				hobj.Set("command", quoted)
+				has[quoted] = true
+				kept = append(kept, h)
+				changes = append(changes, fmt.Sprintf("hooks.PreToolUse had %q, now %q", s, quoted))
+			}
+		}
+		switch {
+		case len(kept) == len(list):
+		case len(kept) == 0:
+			entries = append(entries[:i], entries[i+1:]...)
+			i--
+		default:
+			obj.Set("hooks", kept)
+		}
+	}
 	for _, g := range guards {
 		if !has[g.command] {
 			entries = append(entries, hook(g.matcher, g.command, g.status))
+			changes = append(changes, fmt.Sprintf("hooks.PreToolUse gained %q", g.command))
 		}
 	}
 	hooks.Set("PreToolUse", entries)
 
 	after, err := ojson.Marshal(root)
-	return before, after, err
+	return before, after, changes, err
+}
+
+// the file a chain of links ends at, which need not exist yet
+func linkTarget(path string) (string, error) {
+	for range 40 {
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		to, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(to) {
+			to = filepath.Join(filepath.Dir(path), to)
+		}
+		path = to
+	}
+	return "", fmt.Errorf("%s is part of a loop of links", path)
 }
 
 func Settings(home string, out io.Writer) error {
@@ -216,26 +346,40 @@ func Settings(home string, out io.Writer) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	before, after, err := MergeSettings(data, home)
+	before, after, changes, err := mergeSettings(data, home)
 	var wrong wrongType
-	if errors.As(err, &wrong) {
+	switch {
+	case errors.As(err, &wrong):
 		return fmt.Errorf("%s has a %s key that is not a JSON %s, left as it is", file, wrong.key, wrong.want)
-	}
-	if err != nil {
-		return fmt.Errorf("%s is not valid JSON, left as it is", file)
+	case errors.Is(err, errNotObject):
+		return fmt.Errorf("%s is not a JSON object, left as it is", file)
+	case err != nil:
+		return notJSON(file, data, err)
 	}
 	if len(data) > 0 && bytes.Equal(before, after) {
 		fmt.Fprintf(out, "claude settings: %s unchanged\n", file)
 		return nil
 	}
-	mode := os.FileMode(0o644)
-	if info, err := os.Stat(file); err == nil {
-		mode = info.Mode().Perm()
-	}
-	if err := writeAtomic(file, after, mode); err != nil {
+	// a settings file kept elsewhere through a link, such as in dotfiles, is written where it is
+	target, err := linkTarget(file)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "claude settings: %s\n", file)
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(target); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeAtomic(target, after, mode); err != nil {
+		return err
+	}
+	if target != file {
+		fmt.Fprintf(out, "claude settings: %s, through the link to %s\n", file, target)
+	} else {
+		fmt.Fprintf(out, "claude settings: %s\n", file)
+	}
+	for _, c := range changes {
+		fmt.Fprintf(out, "  %s\n", c)
+	}
 	return nil
 }
 
@@ -272,7 +416,7 @@ func Trust(home, dir string) error {
 	}
 	v, err := ojson.Parse(data)
 	if err != nil {
-		return fmt.Errorf("%s is not valid JSON, left as it is", file)
+		return notJSON(file, data, err)
 	}
 	root, ok := v.(*ojson.Object)
 	if !ok {

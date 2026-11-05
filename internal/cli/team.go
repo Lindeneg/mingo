@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,9 +36,15 @@ func teamProject() (*config.Project, string, error) {
 	return p, root, nil
 }
 
+var prNumberRe = regexp.MustCompile(`^[1-9][0-9]*$`)
+
+// the arguments are checked before the clone is looked for, so a wrong call says how to call it anywhere
 func (e *env) pr(args []string) error {
-	if len(args) == 0 || (args[0] != "merge" && args[0] != "rebase") {
-		return errors.New("pr merge <number> | pr rebase <branch>")
+	if err := subcommand(args, "pr", "merge", "rebase"); err != nil {
+		return err
+	}
+	if args[0] == "merge" && !prNumberRe.MatchString(args[1]) {
+		return badUsage(fmt.Sprintf("%q is not a pull request number", args[1]), "pr", "merge")
 	}
 	p, root, err := teamProject()
 	if err != nil {
@@ -59,6 +66,9 @@ func (e *env) pr(args []string) error {
 }
 
 func (e *env) gate(args []string) error {
+	if err := exactlyOne(args, "gate"); err != nil {
+		return err
+	}
 	p, root, err := teamProject()
 	if err != nil {
 		return err

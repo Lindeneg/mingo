@@ -26,6 +26,18 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stdout, "to stdout")
 		fmt.Fprintln(os.Stderr, "to stderr")
 		os.Exit(2)
+	case "group":
+		Capture(Options{Timeout: time.Minute}, "sh", "-c", `sleep 600 & echo $! >"$1"; wait`, "_", os.Getenv("TEAM_FILE"))
+		os.Exit(0)
+	case "tty":
+		r, err := Capture(Options{Timeout: 20 * time.Second}, "sh", "-c", `read -r line </dev/tty && printf '%s\n' "$line" >"$1"`, "_", os.Getenv("TEAM_FILE"))
+		if err != nil || !r.OK() {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	case "tty-sleep":
+		Capture(Options{Timeout: time.Minute}, "sh", "-c", `echo $$ >"$1"; exec sleep 600`, "_", os.Getenv("TEAM_FILE"))
+		os.Exit(0)
 	}
 	code := m.Run()
 	if templateDir != "" {

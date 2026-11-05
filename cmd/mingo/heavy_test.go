@@ -74,9 +74,64 @@ func TestHeavySaysWhoHoldsTheSlotsAndTakesTheOneThatFrees(t *testing.T) {
 		os.Remove(filepath.Join(dir, "slot-1"))
 	}()
 	r := h.runIn("", []string{"MINGO_HEAVY_MIN_FREE_MB=0", "MINGO_HEAVY_POLL_S=1"}, h.bin, "heavy", "check", "--", "true")
-	if r.code != 0 || !strings.Contains(r.out, "check waits for a slot, held by build (pid") || !strings.Contains(r.out, "test (pid") ||
+	if r.code != 0 || !strings.Contains(r.out, "check waits for a slot, every slot is taken: build (pid") || !strings.Contains(r.out, "test (pid") ||
 		!strings.Contains(r.out, "check took slot 1") {
 		t.Fatal(r.out)
+	}
+}
+
+func TestHeavyRefusesACommandThatIsNotOnPathAtOnceWithoutWaiting(t *testing.T) {
+	h := newHome(t)
+	h.heavyHolder(1, "build")
+	h.heavyHolder(2, "test")
+	started := time.Now()
+	r := h.runIn("", []string{"MINGO_HEAVY_POLL_S=1"}, h.bin, "heavy", "build", "--", "pnpmm", "build")
+	if r.code != 127 || r.out != "mingo heavy: \"pnpmm\" is not a command on PATH, check its name\n" || time.Since(started) > 3*time.Second {
+		t.Fatal(r.code, r.out, time.Since(started))
+	}
+}
+
+func TestHeavyKeepsTheSlotWhileTheCommandOutlivesAKilledMingoHeavy(t *testing.T) {
+	h := newHome(t)
+	dir := h.heavyDir()
+	pidFile := filepath.Join(h.root, "pid")
+	first := exec.Command(h.bin, "heavy", "check", "--", "bash", "-c", `trap '' TERM; echo $$ >"$1"; exec sleep 600`, "_", pidFile)
+	first.Env = append(h.env(), "MINGO_HEAVY_SLOTS=1")
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	h.mustWait(10, "the command's pid", func() bool { return strings.TrimSpace(h.read(pidFile)) != "" })
+	var child int
+	fmt.Sscan(h.read(pidFile), &child)
+	t.Cleanup(func() { syscall.Kill(child, syscall.SIGKILL) })
+	h.mustWait(10, "the command's pid in the slot", func() bool {
+		return len(strings.Split(strings.TrimSpace(h.read(filepath.Join(dir, "slot-1"))), "\n")) == 3
+	})
+	first.Process.Kill()
+	first.Wait()
+	second := exec.Command(h.bin, "heavy", "next", "--", "true")
+	second.Env = append(h.env(), "MINGO_HEAVY_SLOTS=1", "MINGO_HEAVY_POLL_S=1")
+	var out strings.Builder
+	second.Stdout, second.Stderr = &out, &out
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- second.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatal("took the slot of a command that still runs", err, out.String())
+	case <-time.After(3 * time.Second):
+	}
+	syscall.Kill(child, syscall.SIGKILL)
+	select {
+	case err := <-done:
+		if err != nil || !strings.Contains(out.String(), fmt.Sprintf("next waits for a slot, every slot is taken: check (pid %d, ", child)) || !strings.Contains(out.String(), "next took slot 1") {
+			t.Fatal(err, out.String())
+		}
+	case <-time.After(10 * time.Second):
+		second.Process.Kill()
+		t.Fatal("the slot was not taken back once the command died", out.String())
 	}
 }
 

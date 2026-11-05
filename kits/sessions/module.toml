@@ -26,5 +26,9 @@ default = "{first role}"
 
 [[asks]]
 key = "claude_files"
-question = "where Claude's files go: repo, or local to each clone and out of git"
+question = "where Claude's files go"
 default = "repo"
+choices = [
+    { value = "repo", hint = "in the repository, shared through git" },
+    { value = "local", hint = "out of git, written into each clone" },
+]

@@ -328,19 +328,40 @@ func gh(d MergeDeps, what string, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case r.NotFound:
-		return "", stop("gh, the GitHub CLI, is not installed")
-	case r.TimedOut:
-		return "", stop(fmt.Sprintf("%s did not finish in %d seconds", what, int(GHTimeout.Seconds())))
-	case r.Code != 0:
-		text := r.Stderr
-		if text == "" {
-			text = r.Stdout
-		}
-		return "", stop(what + " failed:\n" + LastLines(text, 5))
+	if err := ghFailure(what, r); err != nil {
+		return "", err
 	}
 	return r.Stdout, nil
+}
+
+func ghText(r Result) string {
+	if r.Stderr == "" {
+		return r.Stdout
+	}
+	return r.Stderr
+}
+
+func ghFailure(what string, r Result) error {
+	switch {
+	case r.NotFound:
+		return stop("gh, the GitHub CLI, is not installed")
+	case r.TimedOut:
+		return stop(fmt.Sprintf("%s did not finish in %d seconds", what, int(GHTimeout.Seconds())))
+	case r.Code != 0:
+		return stop(what + " failed:\n" + LastLines(ghText(r), 5))
+	}
+	return nil
+}
+
+func isMerged(d MergeDeps, number int) bool {
+	out, err := gh(d, "reading the pull request's state", "pr", "view", strconv.Itoa(number), "--json", "state")
+	if err != nil {
+		return false
+	}
+	var state struct {
+		State string `json:"state"`
+	}
+	return parse(out, "reading the pull request's state", &state, "state") == nil && state.State == "MERGED"
 }
 
 // the keys must all be there, a missing one is a shape this command does not know
@@ -482,15 +503,9 @@ func Merge(d MergeDeps, args []string) (int, error) {
 
 func merge(d MergeDeps, number string) (int, error) {
 	p, w := d.Project, &d.Project.Workflow
-	login, err := d.Run(Options{Dir: d.Root, Timeout: GHTimeout}, "gh", "auth", "status")
-	if err != nil {
+	// only the account gh uses for github.com, since a problem with any other fails the plain form
+	if _, err := gh(d, "checking gh's login to github.com", "auth", "status", "--active", "--hostname", "github.com"); err != nil {
 		return ExitFailed, err
-	}
-	if login.NotFound {
-		return ExitFailed, stop("gh, the GitHub CLI, is not installed")
-	}
-	if !login.OK() {
-		return ExitFailed, stop("gh is not logged in to GitHub: run `gh auth login`, then try again")
 	}
 	f, err := readFacts(d, number)
 	if err != nil {
@@ -510,11 +525,25 @@ func merge(d MergeDeps, number string) (int, error) {
 		return ExitFailed, nil
 	}
 	subject := MergeSubject(p, pr)
-	if _, err := gh(d, "the merge", "pr", "merge", strconv.Itoa(pr.Number), "--squash", "--delete-branch",
-		"--match-head-commit", head, "--subject", subject, "--body", ""); err != nil {
+	merged, err := d.Run(Options{Dir: d.Root, Timeout: GHTimeout}, "gh", "pr", "merge", strconv.Itoa(pr.Number), "--squash", "--delete-branch",
+		"--match-head-commit", head, "--subject", subject, "--body", "")
+	if err != nil {
 		return ExitFailed, err
 	}
-	fmt.Fprintln(d.Out, "merged: "+subject)
+	// gh deletes the branch once the merge is done and fails when that fails, so the merge may stand
+	if failed := ghFailure("the merge", merged); failed != nil {
+		if merged.NotFound || !isMerged(d, pr.Number) {
+			return ExitFailed, failed
+		}
+		fmt.Fprintln(d.Out, "merged: "+subject)
+		if merged.TimedOut {
+			fmt.Fprintf(d.Out, "gh did not finish in %d seconds after the merge, so the branch may be left: delete it by hand if it is\n", int(GHTimeout.Seconds()))
+		} else {
+			fmt.Fprintln(d.Out, "deleting the branch failed, delete it by hand:\n"+LastLines(ghText(merged), 5))
+		}
+	} else {
+		fmt.Fprintln(d.Out, "merged: "+subject)
+	}
 	var shared []string
 	for _, file := range pr.Files {
 		if s, ok := w.SharedFile(file.Path); ok {

@@ -292,3 +292,310 @@ func TestBashAllowsLoopsThatListOrKillAlone(t *testing.T) {
 		"for f in *.log; do pgrep -f $f; done; kill 1234",
 	}}})
 }
+
+func TestBashReadsTheAmpersandOfARedirectAsPartOfTheRedirect(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pgrep -f vite 2>&1 | xargs kill",
+		"pgrep node |& xargs kill",
+		"pgrep node 2>&1 | while read p; do kill $p; done",
+		"pidof node 2>&1|xargs kill",
+		"pgrep node &>/dev/null | xargs kill",
+		"pgrep node >&2 | xargs kill",
+		"pgrep node <&0 | xargs kill",
+		"pgrep node |& tee pids | xargs kill",
+		"for p in $(pgrep node 2>&1); do kill $p; done",
+		"kill node &>/dev/null",
+		"kill node&>/dev/null",
+		"kill node 2>&1",
+		"kill >| out node",
+		`echo ">"& pkill node`,
+		`echo \>& pkill node`,
+		`echo \>|pkill node`,
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"kill 1234 2>&1",
+		"kill $pid &>/dev/null",
+		"kill 1234 >&2",
+		"pgrep node >| pids.txt",
+		"pgrep -f vite 2>&1",
+	}}})
+}
+
+func TestBashReadsACommentAsNothingToRun(t *testing.T) {
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"kill 1234 # the dev server",
+		"kill $(cat .vite.pid) # stop vite",
+		"kill 1234 # not $(pgrep node)",
+		"kill 1234 # not (pgrep node)",
+		"echo ok # don't pkill node",
+		"# pkill node\nkill 1234",
+		"kill 1234;# pkill node",
+	}}})
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pkill node # stop it",
+		"kill $(pgrep node) # stop it",
+		"true # one\npkill node",
+		"echo hi # don't\npkill node",
+		"echo a#b; pkill node",
+		"echo $#; pkill node",
+		"echo ${#x}; pkill node",
+		`echo ""#x; pkill node`,
+		"echo '#'; pkill node",
+		`echo \#x; pkill node`,
+		"true #; pkill node",
+	}}})
+}
+
+func TestBashCountsAListerOrAKillOnlyAsTheCommandWord(t *testing.T) {
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"grep -rn pgrep tools/kill-port.sh",
+		"git diff -- src/pidof.ts src/kill.ts",
+		"cat src/kill.ts src/pgrep.ts",
+		"git log --grep kill | grep pgrep",
+		"command -v pkill",
+		"command -V pkill",
+		"command -pv pkill",
+		"ps aux | grep -i terminate",
+	}}})
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"command pkill node",
+		"command -p pkill node",
+		"command -v pkill && pkill node",
+		"ps aux | grep terminate | xargs kill",
+		"pgrep node | grep -v x | xargs kill",
+		"FOO=1 pgrep -f vite | xargs kill",
+		"sudo -n pgrep -f vite | xargs sudo kill",
+		"nohup kill $(pgrep node)",
+		"time kill $(pidof vite)",
+		"exec kill $(pgrep node)",
+		"xargs kill < <(pgrep node)",
+	}}})
+}
+
+func TestBashAllowsPgrepThatPicksTheChildrenOfAParentID(t *testing.T) {
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"pgrep -P 4321 | xargs kill",
+		"pgrep -P4321 | xargs kill",
+		"pgrep --parent 4321 | xargs kill",
+		"pgrep --parent=4321 | xargs kill",
+		"pgrep -P 4321 -u chris | xargs kill",
+		"kill $(pgrep -P 4321)",
+		"for p in $(pgrep -P $$); do kill $p; done",
+	}}})
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pgrep -f name | xargs kill",
+		"pgrep -P 4321 node | xargs kill",
+		"pgrep -P 4321 -f vite | xargs kill",
+		"pgrep -P 4321 -- node | xargs kill",
+		"pgrep -v -P 4321 | xargs kill",
+		"pgrep -vP 4321 | xargs kill",
+		"pgrep -P 4321 --inverse | xargs kill",
+		"pgrep -u chris | xargs kill",
+		"pkill -P 4321",
+	}}})
+}
+
+func TestBashDeniesPgrepByTheParentOfEveryService(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pgrep -P 1 | xargs kill",
+		"pgrep -P 0 | xargs kill",
+		"pgrep -P1 | xargs kill",
+		"pgrep -P 01 | xargs kill",
+		"pgrep --parent=1 | xargs kill",
+		"pgrep -P 4321,1 | xargs kill",
+		"kill $(pgrep -P 1)",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"pgrep -P $$ | xargs kill",
+		"pgrep -P $PPID | xargs kill",
+		"pgrep -P 4321,4322 | xargs kill",
+	}}})
+}
+
+func TestBashReadsTheCommandOfEveryWrapperItKnows(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"setsid kill $(pgrep node)",
+		"setsid -f pkill node",
+		"stdbuf -oL kill $(pgrep node)",
+		"stdbuf --output=L pkill node",
+		"nice -n 5 kill $(pgrep node)",
+		"ionice -c3 kill $(pgrep node)",
+		"chrt -f 10 pkill node",
+		"taskset 03 pkill node",
+		"taskset -c 0-3 kill $(pidof node)",
+		"timeout 5 kill $(pgrep node)",
+		"env kill $(pgrep node)",
+		"env -S 'pkill node'",
+		"env --split-string='pkill node'",
+		"doas kill $(pgrep node)",
+		"sudo --user='root' pkill node",
+		"busybox pkill node",
+		"busybox kill $(pidof node)",
+		"busybox pgrep node | xargs kill",
+		"sshpass -p pw ssh localhost pkill node",
+		"watch 'pgrep x | xargs kill'",
+		"watch -n 5 'pkill node'",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"chrt -p 1234",
+		"taskset -p 03 1234",
+		"busybox ls",
+		"busybox grep pgrep tools/kill-port.sh",
+		"setsid kill 1234",
+	}}})
+}
+
+func TestBashReadsParallelAsEveryCommandItMayRun(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"parallel kill ::: $(pgrep node)",
+		"parallel kill ::: node vite",
+		"parallel 'kill {}' ::: node",
+		"parallel -j4 kill ::: node",
+		"parallel --joblog log kill ::: node",
+		"parallel --unknown x kill ::: node",
+		"pgrep node | parallel kill",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"parallel kill ::: 1234 5678",
+		"parallel 'kill {}' ::: 1234",
+		"pgrep -P 4321 | parallel kill",
+		"parallel gzip ::: *.log",
+	}}})
+}
+
+func TestBashReadsAnSSHCommandAsTheShellAtTheOtherEndWould(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"ssh localhost kill $(pgrep node)",
+		"ssh localhost pkill node",
+		"ssh localhost 'pkill node'",
+		`ssh localhost "pgrep -f vite | xargs kill"`,
+		`ssh localhost 'kill $(pgrep node)'`,
+		"ssh -p 22 localhost pkill node",
+		"ssh -p22 localhost pkill node",
+		"ssh -tp 22 localhost pkill node",
+		"ssh localhost -t pkill node",
+		"ssh -Z localhost pkill node",
+		`ssh -o RemoteCommand="pkill node" host`,
+		`ssh -o ProxyCommand="pkill node" host true`,
+		"autossh -M 0 host pkill node",
+		"pgrep node | ssh host xargs kill",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"ssh localhost kill 1234",
+		"ssh localhost ls -la",
+		"ssh localhost grep -rn pgrep tools/kill-port.sh",
+		"ssh localhost",
+	}}})
+}
+
+func TestBashDeniesAKillBesideAListerInTheArgumentsOfAnyCommand(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"strace kill $(pgrep node)",
+		"flock /tmp/lock kill $(pgrep node)",
+		"unbuffer kill $(pgrep node)",
+		`find . -exec kill {} \; $(pgrep x)`,
+		"tee >(xargs kill) < <(pgrep node)",
+		"Get-CimInstance Win32_Process | Invoke-CimMethod -MethodName Terminate",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"strace -f node server.js",
+		"diff <(pgrep a) <(pgrep b)",
+	}}})
+}
+
+func TestBashGoesOnToTheNextLineAfterAPipe(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pgrep -f vite |\nxargs kill",
+		"pgrep -f vite | \n  xargs kill",
+		"pgrep -f vite |\n\n  xargs kill",
+		"pgrep -f vite | # the ids\n  xargs kill",
+		"pgrep -f vite |&\nxargs kill",
+		"pgrep -f vite \\\n| xargs kill",
+		"pgrep node |\nwhile read p; do kill $p; done",
+		"true &&\npkill node",
+		"false ||\npkill node",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"pgrep -f vite |\nwc -l",
+		"pgrep -f vite\nkill 1234",
+	}}})
+}
+
+func TestBashReadsASubstitutionAsOneWord(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"kill $(\npgrep node\n)",
+		"kill $(\n  pgrep -f vite # the dev server\n)",
+		"x=$(true a) pkill node",
+		`x="$(true a)" pkill node`,
+		"x=${y:-a b} pkill node",
+		"x=`true a` pkill node",
+		`kill "$(echo "$(pgrep node)")"`,
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"x=$(cat a.pid) kill $x",
+		`kill $(cat "$(echo pidfile)")`,
+		"kill $((1000 + 234))",
+	}}})
+}
+
+func TestBashReadsARedirectApartFromTheWordItIsGluedTo(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"pkill>/dev/null node",
+		"pkill 2>/dev/null node",
+		"2>/dev/null pkill node",
+		">/dev/null pkill node",
+		"kill node>/dev/null",
+		"kill node2>/dev/null",
+		"kill node < in.txt",
+		`bash<<<"pkill node"`,
+		`bash <<<"pkill node"`,
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"kill 1234 > out.log",
+		"kill 1234 >> out.log",
+		"kill 1234 2> err.log",
+		"kill 1234 &> all.log",
+		"kill 1234 < in.txt",
+		"kill 1234 > node",
+		"kill $PID > /dev/null 2>&1",
+		`cat <<<"pkill node"`,
+	}}})
+}
+
+func TestBashDeniesAKillGivenAWordThatIsNoProcessID(t *testing.T) {
+	expectBash(t, true, []bashCases{{"Bash", []string{
+		"echo node | xargs kill",
+		"echo node vite | xargs kill",
+		"echo -n node | xargs kill",
+		`printf '%s\n' node | xargs kill`,
+		`printf 'node\n' | xargs kill`,
+		"echo node | while read p; do kill $p; done",
+		"xargs kill <<< node",
+		"while read p; do kill $p; done <<< node",
+		"for p in node vite; do kill $p; done",
+		`for p in node; do kill -9 "$p"; done`,
+		"n=node; kill $n",
+		"n=node; kill ${n}",
+		"export N=node; kill $N",
+		"kill $(echo node)",
+	}}})
+	expectBash(t, false, []bashCases{{"Bash", []string{
+		"echo 1234 | xargs kill",
+		"echo $PID | xargs kill",
+		`echo "$PIDS" | xargs kill`,
+		`printf '%s\n' 1234 | xargs kill`,
+		"xargs kill <<< 1234",
+		"for i in 1 2 3; do kill $i; done",
+		"for f in *.pid; do kill $(cat $f); done",
+		"for p in $(cat pids); do kill $p; done",
+		"PID=$(cat .pid); kill $PID",
+		"n=node; n=1234; kill $n",
+		"kill $(echo 1234)",
+		"cat pids | xargs kill",
+		"lsof -ti :3000 | xargs kill",
+		"jobs -p | xargs kill",
+		`echo "stopping server" && kill $(cat server.pid)`,
+		`kill $(cat server.pid) || echo "not running"`,
+		`echo "Killing $(cat pid)"; kill $(cat pid)`,
+	}}})
+}
