@@ -156,7 +156,7 @@ func TestSetupTrustsAndFillsTheEnvOfACloneThatWasThereBefore(t *testing.T) {
 	}
 	h.write(filepath.Join(h.home, ".claude.json"), "{}\n")
 	r := h.mingo("setup", "demo")
-	if r.code != 1 || !strings.Contains(r.out, "trusted: "+lead+"\n") || !strings.Contains(r.out, "trusted: "+helper+"\nmingo: ") {
+	if r.code != 0 || !strings.Contains(r.out, "trusted: "+lead+"\n") || !strings.Contains(r.out, "trusted: "+helper+"\nports: leaves out "+helper+"/.env, the clone has no .env.example yet") {
 		t.Fatal(r.code, r.out)
 	}
 	if h.read(filepath.Join(lead, ".env")) != "APP_PORT_OFFSET=10\n" || !strings.Contains(h.read(filepath.Join(h.home, ".claude.json")), helper) {
