@@ -29,12 +29,19 @@ jobs:
         with:
           # gitleaks scans the history of the pull request's commits.
           fetch-depth: 0
+[[- if or (ne $.CI.Stack "other") $.CI.Setup]]
       - uses: ./.github/actions/setup
-      - name: Dependency audit
+[[- end]]
 [[- if eq $.CI.Stack "go"]]
+      - name: Dependency audit
         # Fails on a known vulnerability the code reaches.
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+[[- else if eq $.CI.Stack "other"]][[if $.CI.Audit]]
+      - name: Dependency audit
+        run: [[$.CI.Audit]]
+[[- end]]
 [[- else]]
+      - name: Dependency audit
         # Fails on a known vulnerability of high or critical severity.
         run: [[if eq $.CI.Stack "pnpm"]]pnpm audit --audit-level high[[else]]npm audit --audit-level=high[[end]]
 [[- end]]
@@ -53,7 +60,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+[[- if or (ne $.CI.Stack "other") $.CI.Setup]]
       - uses: ./.github/actions/setup
+[[- end]]
       - run: [[$.CI.Command $check]]
 [[- end]][[end]]
 [[end]][[end]]

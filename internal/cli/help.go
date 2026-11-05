@@ -335,8 +335,8 @@ one an answer with no default stops it.
 					says += ", " + defaultText(*a.Default)
 				}
 				if a.When != "" {
-					key, value, _ := strings.Cut(a.When, "=")
-					says += ", when " + key + " is " + value
+					key, values, _ := strings.Cut(a.When, "=")
+					says += ", when " + key + " is " + strings.ReplaceAll(values, "|", " or ")
 				}
 				flags = append(flags, flag{name, m.Name + ": " + says})
 			}

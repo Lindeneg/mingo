@@ -349,6 +349,25 @@ func TestClaudeFilesAreInTheRepoUnlessLocalAndALocalProjectsReviewReadsTheReadme
 	}
 }
 
+func TestTheStackOtherNeedsEachChecksCommandAndOnlyItTakesSetupAndAudit(t *testing.T) {
+	setupHome(t)
+	addProject(t, "own", `[workflow]`, `checks = ["test", "security"]`, `[ci]`, `stack = "other"`, `setup = ["make deps"]`, `audit = "make audit"`, `[ci.run]`, `test = "make test"`, `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "own"); p.CI.Command("test") != "make test" || strings.Join(p.CI.Setup, ",") != "make deps" || p.CI.Audit != "make audit" {
+		t.Fatal(p.CI)
+	}
+	for want, lines := range map[string][]string{
+		"has the check test with no command, name it in [ci.run]": {`[workflow]`, `checks = ["test"]`, `[ci]`, `stack = "other"`},
+		"has the stack rust, use pnpm, npm, go or other":          {`[ci]`, `stack = "rust"`},
+		"has [ci] setup, which is for the stack other":            {`[ci]`, `stack = "npm"`, `setup = ["make deps"]`},
+		"has [ci] audit, which is for the stack other":            {`[ci]`, `stack = "pnpm"`, `audit = "make audit"`},
+	} {
+		addProject(t, "wrong", append(lines, `[[roles]]`, `name = "lead"`)...)
+		if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatal(want, err)
+		}
+	}
+}
+
 func TestTrackerGivesTheClosesLineAndTheTitlesIssueID(t *testing.T) {
 	setupHome(t)
 	addProject(t, "lin", `[tracker]`, `kind = "linear"`, `team = "ACM"`, `[[roles]]`, `name = "lead"`)

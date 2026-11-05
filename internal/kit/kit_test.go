@@ -113,3 +113,42 @@ func TestTheEmbeddedKitLoadsWithSessionsAlwaysOn(t *testing.T) {
 		t.Fatal(k.Names())
 	}
 }
+
+func TestTheStackOtherRunsItsOwnSetupAndAuditAndHasNoSetupActionWithoutSetup(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(ci string) map[string]string {
+		t.Helper()
+		p := project(t, "repo = \"x/demo\"\nmodules = [\"ci\"]\n[workflow]\nchecks = [\"test\", \"security\"]\n[ci]\nstack = \"other\"\n"+ci+"[ci.run]\ntest = \"make test\"\n[[roles]]\nname = \"lead\"\n")
+		mods, err := k.For(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, err := k.Render(p, mods)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, f := range files {
+			out[f.Path] = f.Text
+		}
+		return out
+	}
+	own := render("setup = [\"make deps\", \"make tools\"]\naudit = \"make audit\"\n")
+	if action := own[".github/actions/setup/action.yml"]; !strings.Contains(action, "    - run: make deps\n      shell: bash\n    - run: make tools\n      shell: bash\n") {
+		t.Fatal(action)
+	}
+	ci := own[".github/workflows/ci.yml"]
+	if strings.Count(ci, "- uses: ./.github/actions/setup\n") != 2 || !strings.Contains(ci, "      - name: Dependency audit\n        run: make audit\n") || !strings.Contains(ci, "      - run: make test\n") {
+		t.Fatal(ci)
+	}
+	none := render("")
+	if _, ok := none[".github/actions/setup/action.yml"]; ok {
+		t.Fatal("a setup action without setup commands")
+	}
+	if ci := none[".github/workflows/ci.yml"]; strings.Contains(ci, "actions/setup") || strings.Contains(ci, "Dependency audit") || !strings.Contains(ci, "Secret scan") {
+		t.Fatal(ci)
+	}
+}

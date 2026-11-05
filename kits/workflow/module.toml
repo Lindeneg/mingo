@@ -9,12 +9,12 @@ default = "master"
 
 [[asks]]
 key = "workflow.gate"
-question = "the gate's commands"
+question = "the commands a role runs before it opens a pull request"
 list = true
 default = ""
 
 [[asks]]
 key = "workflow.tags"
-question = "what a pull request description's first line may be"
+question = "the role tags a pull request description starts with, such as (lead)"
 list = true
 default = ""

@@ -10,7 +10,7 @@ question = "the GitHub repository, as owner/name"
 
 [[asks]]
 key = "title"
-question = "the name the texts call the project"
+question = "the project's display name"
 default = "{name}"
 
 [[asks]]

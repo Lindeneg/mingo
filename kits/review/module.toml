@@ -3,5 +3,5 @@ checks = ["review-token"]
 
 [[asks]]
 key = "review.read"
-question = "what the review reads first"
+question = "what the AI review of each pull request reads before the diff"
 default = "{read}"

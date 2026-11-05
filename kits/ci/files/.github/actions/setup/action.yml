@@ -32,4 +32,13 @@ runs:
     - uses: actions/setup-go@v7
       with:
         go-version-file: go.mod
+[[else if and (eq .CI.Stack "other") .CI.Setup]]name: setup
+description: The project's setup commands, in order.
+runs:
+  using: composite
+  steps:
+[[- range .CI.Setup]]
+    - run: [[.]]
+      shell: bash
+[[- end]]
 [[end]]

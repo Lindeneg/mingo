@@ -91,7 +91,7 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 | sessions | the roles, clones, loop and handoffs |
 | guards | the write and kill guards |
 | workflow | issue, branch, pull request, merge with `mingo pr merge`, and the skills that go with it |
-| ci | a GitHub Actions workflow with a job per check, for pnpm, npm or go |
+| ci | a GitHub Actions workflow with a job per check, for pnpm, npm, go or any other stack with its own commands |
 | review | a Claude review of every pull request |
 | skills | sub-agents, edge-cases and spend skills |
 | team | `TEAM.md` with the team's rules, and the clear-context skill |
@@ -118,7 +118,7 @@ The server sets itself up on the first boot and reboots. Then SSH in as that use
 
 ```toml
 id = "sh"                          # a short name that works anywhere the project's name does
-title = "Shop"                     # the name the kit's texts use, the project's name by default
+title = "Shop"                     # the project's display name, its name by default
 repo = "you/{project}"
 clone = "~/dev/{project}/{role}"   # leave {role} out for a project of one role
 lead = "lead"                      # the first role by default
@@ -151,7 +151,7 @@ base = "master"
 ci = "ci"                          # the workflow whose jobs are the checks
 checks = ["check", "test", "build", "security"]
 gate = ["pnpm check", "pnpm test", "pnpm build"]
-tags = ["(lead)", "(dev)"]         # what a description's first line may be
+tags = ["(lead)", "(dev)"]         # the role tags a description starts with
 reviewer = "claude[bot]"           # whose review comments count, anyone's by default
 local_runs = ["pnpm check", "mingo gate"]
 generate_list = ["pnpm exec tsx tools/generate.ts --list"]
@@ -167,7 +167,9 @@ pattern = '^src/routes\.ts$'
 merge = "lines"                    # lines, json-keys or none
 
 [ci]
-stack = "pnpm"                     # pnpm, npm or go
+stack = "pnpm"                     # pnpm, npm, go or other
+# setup = ["make deps"]            # other only: the commands CI runs before each check
+# audit = "make audit"             # other only: the dependency audit of the security job
 [ci.run]
 check = "pnpm check"               # pnpm <check> or npm run <check> by default
 
