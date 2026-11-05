@@ -277,16 +277,49 @@ func waitUntil(out io.Writer, who, stop string, every time.Duration, ready func(
 	}
 }
 
-// the next session starts from the binary on disk now, unless the config it loads or the binary
-// itself would end the loop, which goes on as it is then
-func (l *loop) startAgain(delay int) {
-	if _, _, err := prepare(l.p.Name, l.role); err != nil {
-		l.say("[mingo] %s: %s\n", l.name, configProblem(l.p.Name, err))
-		l.say("[mingo] %s: the loop goes on with the config it loaded and tries the file again at the next session boundary\n", l.name)
-		return
+// what keeps this mingo from running a loop on the config as it is now, for a loop about to start
+// it at a session boundary. the answer goes to stdout, where a mingo too old to know the check
+// writes nothing
+func Check(out io.Writer, projectName, roleSpec string) int {
+	if _, _, err := prepare(projectName, roleSpec); err != nil {
+		fmt.Fprintln(out, configProblem(projectName, err))
+		return 1
 	}
+	return 0
+}
+
+// what the mingo on disk says against running the loop on the config as it is now, and false when
+// it gave no answer, as a mingo older than the check does
+func checkOnDisk(exe, projectName, role string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, exe, "loop", "--check", projectName, role).Output()
+	if err == nil {
+		return "", true
+	}
+	var exit *exec.ExitError
+	if problem := strings.TrimSpace(string(out)); errors.As(err, &exit) && exit.ExitCode() == 1 && problem != "" {
+		return problem, true
+	}
+	return "", false
+}
+
+// the next session starts from the binary on disk now, unless that binary does not answer or would
+// not run on the config, which it is asked itself since its checks may differ from this loop's. the
+// loop goes on as it is then
+func (l *loop) startAgain(delay int) {
 	if !answersVersion(l.exe) {
 		l.say("[mingo] %s: the mingo on disk does not answer mingo version, continuing with the loaded loop\n", l.name)
+		return
+	}
+	problem, answered := checkOnDisk(l.exe, l.p.Name, l.role)
+	if !answered {
+		l.say("[mingo] %s: the mingo on disk does not answer mingo loop --check, continuing with the loaded loop\n", l.name)
+		return
+	}
+	if problem != "" {
+		l.say("[mingo] %s: %s\n", l.name, problem)
+		l.say("[mingo] %s: the loop goes on with the config it loaded and tries the file again at the next session boundary\n", l.name)
 		return
 	}
 	l.remove("running", "pid")

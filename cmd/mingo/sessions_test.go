@@ -308,3 +308,84 @@ func TestStopOfAProjectThatDoesNotRunSaysSo(t *testing.T) {
 		t.Fatal(r.out)
 	}
 }
+
+// the config made unloadable, and what loading it says
+func (h *home) breakDemo() string {
+	h.t.Helper()
+	file := filepath.Join(h.config, "projects", "demo.toml")
+	h.write(file, "[[roles]\n")
+	r := h.mingo("path", "demo/lead")
+	if r.code != 1 || !strings.HasPrefix(r.out, "mingo: "+file+": ") {
+		h.t.Fatal(r.code, r.out)
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(r.out, "mingo: "), "\n")
+}
+
+func TestTheLoopControlsReachASessionWrittenAsProjectAndRoleWhileTheConfigDoesNotLoad(t *testing.T) {
+	h := newHome(t)
+	h.startLoop("listens")
+	problem := h.breakDemo()
+	warning := "mingo: demo's config does not load, so the command goes to the tmux session demo-lead: " + problem + "\n"
+	if r := h.mingo("say", "demo/lead", "hello"); r.code != 0 || r.out != warning {
+		t.Fatal(r.code, r.out)
+	}
+	h.mustWait(10, "the typed text", func() bool { return h.typed() == "hello" })
+	if r := h.mingo("peek", "demo/lead"); r.code != 0 || !strings.HasPrefix(r.out, warning) || !strings.Contains(r.out, "fresh session at") {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("restart", "demo/lead"); r.code != 0 || r.out != warning+"demo-lead: /exit within seconds ends the session where it stands, then the loop starts a fresh one\n" {
+		t.Fatal(r.code, r.out)
+	}
+	h.mustWait(30, "the second start", h.startsAre(2))
+	if r := h.mingo("stop", "demo/lead"); r.code != 0 || r.out != warning+"demo-lead: stopped\n" {
+		t.Fatal(r.code, r.out)
+	}
+}
+
+func TestATargetWithoutItsRoleIsRefusedWhileTheConfigDoesNotLoad(t *testing.T) {
+	h := newHome(t)
+	h.startLoop("obeys")
+	problem := h.breakDemo()
+	want := "mingo: demo's config does not load, so write the target as demo/<role>: " + problem + "\n"
+	for _, words := range [][]string{{"stop", "demo"}, {"attach", "demo"}, {"say", "demo", "hello"}} {
+		if r := h.mingo(words...); r.code != 1 || r.out != want {
+			t.Fatal(words, r.code, r.out)
+		}
+	}
+	if r := h.runIn("", []string{"MINGO_PROJECT=demo"}, h.bin, "peek", "lead"); r.code != 1 || r.out != want {
+		t.Fatal(r.code, r.out)
+	}
+	if exists(h.marker("stop")) || h.starts() != 1 {
+		t.Fatal("a refused target touched the session")
+	}
+}
+
+func TestClearInsideASessionNeedsNoConfigThatLoads(t *testing.T) {
+	h := newHome(t)
+	h.startLoop("obeys")
+	h.breakDemo()
+	r := h.runIn(h.root, []string{"MINGO_PROJECT=demo", "MINGO_ROLE=lead"}, h.bin, "clear")
+	if r.code != 0 || r.out != "demo/lead: the loop ends this session within seconds and starts a fresh one\n" {
+		t.Fatal(r.code, r.out)
+	}
+	h.mustWait(20, "the second start", h.startsAre(2))
+}
+
+func TestStatusAsksTheClaudeThatMingoClaudeNames(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	r := h.runIn("", []string{h.pathWithoutClaude(), "MINGO_CLAUDE=/nowhere/claude"}, h.bin, "status", "demo")
+	if lines := r.lines(); r.code != 0 || len(lines) != 3 || lines[2] != "/nowhere/claude: not installed on this host, see https://code.claude.com/docs/en/setup" {
+		t.Fatal(r.code, r.out)
+	}
+	h.installStandIn()
+	claude := filepath.Join(h.root, "elsewhere", "claude")
+	h.mkdir(filepath.Dir(claude))
+	if err := os.Rename(filepath.Join(h.home, ".local", "bin", "claude"), claude); err != nil {
+		t.Fatal(err)
+	}
+	r = h.runIn("", []string{"MINGO_CLAUDE=" + claude}, h.bin, "status", "demo")
+	if lines := r.lines(); r.code != 0 || len(lines) != 3 || lines[2] != "stand-in is logged in" {
+		t.Fatal(r.code, r.out)
+	}
+}

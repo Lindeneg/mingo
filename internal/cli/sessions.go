@@ -110,14 +110,14 @@ type picked struct {
 }
 
 // every target is resolved before any session is touched, so a typo changes nothing
-func pick(specs []string, onlyAutostart bool) ([]picked, error) {
+func pick(specs []string, onlyAutostart bool, parse func(string) (*config.Project, string, error)) ([]picked, error) {
 	specs, err := specsOrDefault(specs)
 	if err != nil {
 		return nil, err
 	}
 	var all []picked
 	for _, spec := range specs {
-		p, role, err := config.ParseTarget(spec)
+		p, role, err := parse(spec)
 		if err != nil {
 			return nil, err
 		}
@@ -131,6 +131,48 @@ func pick(specs []string, onlyAutostart bool) ([]picked, error) {
 		}
 	}
 	return all, nil
+}
+
+// the project and role a command that controls a running loop acts on, with no role named the lead
+// when lead is set and the whole project when not. a loop runs on the config it loaded, so while
+// the config does not load a target written as project/role still reaches the session by its names
+func (e *env) loopTarget(spec string, lead bool) (*config.Project, string, error) {
+	name, part, written := strings.Cut(spec, "/")
+	if !written {
+		if config.Known(spec) {
+			name, part = spec, ""
+		} else {
+			var err error
+			if name, err = config.DefaultProject(); err != nil {
+				return nil, "", err
+			}
+			part = spec
+		}
+	}
+	p, err := config.Find(name)
+	if err != nil {
+		found, ok := config.NameOf(name)
+		if !ok {
+			return nil, "", err
+		}
+		if !written || !config.IsName(part) {
+			return nil, "", fmt.Errorf("%s's config does not load, so write the target as %s/<role>: %v", found, found, err)
+		}
+		p = &config.Project{Name: found}
+		fmt.Fprintf(e.err, "mingo: %s's config does not load, so the command goes to the tmux session %s: %v\n", found, p.SessionName(part), err)
+		return p, part, nil
+	}
+	switch {
+	case part != "":
+		role, err := p.Resolve(part)
+		if err != nil {
+			return nil, "", err
+		}
+		return p, role, nil
+	case lead:
+		return p, p.Lead, nil
+	}
+	return p, "", nil
 }
 
 func claudeCommand() string {
@@ -158,7 +200,7 @@ func (e *env) start(args []string) error {
 	if err != nil {
 		return err
 	}
-	all, err := pick(specs, set["--autostart"])
+	all, err := pick(specs, set["--autostart"], config.ParseTarget)
 	if err != nil {
 		return err
 	}
@@ -183,7 +225,7 @@ func (e *env) stop(args []string) error {
 	if err != nil {
 		return err
 	}
-	all, err := pick(specs, false)
+	all, err := pick(specs, false, func(spec string) (*config.Project, string, error) { return e.loopTarget(spec, false) })
 	if err != nil {
 		return err
 	}
@@ -247,7 +289,7 @@ func (e *env) restart(args []string) error {
 	if len(args) > 0 {
 		spec = args[0]
 	}
-	p, role, err := config.ParseRoleTarget(spec)
+	p, role, err := e.loopTarget(spec, true)
 	if err != nil {
 		return err
 	}
@@ -278,7 +320,7 @@ func (e *env) restart(args []string) error {
 }
 
 func (e *env) attach(spec string, readOnly bool) error {
-	p, role, err := config.ParseRoleTarget(spec)
+	p, role, err := e.loopTarget(spec, true)
 	if err != nil {
 		return err
 	}
@@ -306,7 +348,7 @@ func (e *env) peek(args []string) error {
 	if err != nil {
 		return fmt.Errorf("peek takes a number of lines, not %s", lines)
 	}
-	p, role, err := config.ParseRoleTarget(spec)
+	p, role, err := e.loopTarget(spec, true)
 	if err != nil {
 		return err
 	}
@@ -326,7 +368,7 @@ func (e *env) say(args []string) error {
 	if len(args) < 2 {
 		return badUsage("", "say")
 	}
-	p, role, err := config.ParseRoleTarget(args[0])
+	p, role, err := e.loopTarget(args[0], true)
 	if err != nil {
 		return err
 	}
@@ -400,13 +442,13 @@ func (e *env) status(names []string) error {
 			}
 		}
 	}
-	if !installed("claude") {
-		fmt.Fprintf(e.out, "claude: not installed on this host, see %s\n", claudeSite)
+	if claude := claudeCommand(); !installed(claude) {
+		fmt.Fprintf(e.out, "%s: not installed on this host, see %s\n", claude, claudeSite)
 	} else {
-		cmd := exec.Command("claude", "auth", "status", "--text")
+		cmd := exec.Command(claude, "auth", "status", "--text")
 		cmd.Stdout = e.out
 		if cmd.Run() != nil {
-			fmt.Fprintln(e.out, "claude: not logged in on this host")
+			fmt.Fprintf(e.out, "%s: not logged in on this host\n", claude)
 		}
 	}
 	if failed {
@@ -567,6 +609,8 @@ func (e *env) ls() error {
 	return nil
 }
 
+// the names the loop gave the session are the names its tmux session and markers go by, so they
+// need no config that loads
 func (e *env) clear() error {
 	name, role := os.Getenv("MINGO_PROJECT"), os.Getenv("MINGO_ROLE")
 	if name == "" || role == "" {
@@ -584,10 +628,7 @@ func (e *env) clear() error {
 		}
 		name = found
 	}
-	p, err := config.Load(name)
-	if err != nil {
-		return err
-	}
+	p := &config.Project{Name: name}
 	if session := p.SessionName(role); !e.host.Has(session) {
 		return fmt.Errorf("%s is not running, so there is no session to clear", session)
 	}

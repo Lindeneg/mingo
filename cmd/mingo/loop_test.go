@@ -332,3 +332,62 @@ func TestLoopRunsTheNextSessionFromTheBinaryOnDiskWhenItAnswers(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+// a copy of mingo of this test's own, which the test can replace as a rebuild would
+func (h *home) ownBinary() {
+	h.t.Helper()
+	data, err := os.ReadFile(mingoBin)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.bin = filepath.Join(h.root, "mingo")
+	if err := os.WriteFile(h.bin, data, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func (h *home) rebuild(script string) {
+	h.t.Helper()
+	h.write(h.bin+".new", script)
+	if err := os.Chmod(h.bin+".new", 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.Rename(h.bin+".new", h.bin); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func TestLoopKeepsStartingSessionsWhenARebuiltMingoRefusesTheConfig(t *testing.T) {
+	h := newHome(t)
+	h.ownBinary()
+	h.startLoop("obeys")
+	h.rebuild("#!/bin/sh\ncase \"$1\" in\n    version) echo mingo rebuilt ;;\n    loop) echo \"the config has the key nope\"; exit 1 ;;\n    *) exit 1 ;;\nesac\n")
+	h.touch(h.marker("restart"))
+	h.mustWait(20, "the second start", h.startsAre(2))
+	s := h.screen()
+	if !strings.Contains(s, "[mingo] demo-lead: the config has the key nope\n") ||
+		!strings.Contains(s, "[mingo] demo-lead: the loop goes on with the config it loaded and tries the file again at the next session boundary") {
+		t.Fatal(s)
+	}
+	h.touch(h.marker("restart"))
+	h.mustWait(20, "the third start", h.startsAre(3))
+}
+
+func TestLoopCheckSaysWhatKeepsALoopFromRunningOnTheConfig(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	if r := h.mingo("loop", "--check", "demo", "l"); r.code != 0 || r.out != "" {
+		t.Fatal(r.code, r.out)
+	}
+	if err := removeDir(filepath.Join(h.home, "dev", "demo", "helper")); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(h.config, "projects", "demo.toml")
+	want := file + ": demo-helper has no clone at " + h.home + "/dev/demo/helper, see mingo setup demo\n"
+	if r := h.mingo("loop", "--check", "demo", "helper"); r.code != 1 || r.out != want {
+		t.Fatal(r.code, r.out)
+	}
+	if r := h.mingo("loop", "--check", "demo"); r.code != 2 || !strings.HasPrefix(r.out, "usage: mingo loop <project> <role>\n") {
+		t.Fatal(r.code, r.out)
+	}
+}

@@ -323,6 +323,12 @@ func (e *env) dispatch(args []string) error {
 		fmt.Fprintf(e.out, "mingo %s\n", mingo.Version())
 		return nil
 	case "loop":
+		if len(args) > 0 && args[0] == "--check" {
+			if len(args) != 3 {
+				return badUsage("", "loop")
+			}
+			return exitError(loop.Check(e.out, args[1], args[2]))
+		}
 		if len(args) != 2 {
 			return badUsage("", "loop")
 		}

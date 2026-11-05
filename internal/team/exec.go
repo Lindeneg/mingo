@@ -87,10 +87,13 @@ func catch() (chan os.Signal, func()) {
 	return signals, func() { signal.Stop(signals) }
 }
 
-// the command and what it starts share a process group of their own, so a timeout ends every one
-// of them. a signal to this process reaches the group too, then ends this process as it would have
-// without the group, unless a caller here cleans up first. the error is only for a program that
-// cannot start for another reason than not being installed, and for that signal
+// without a terminal the command and what it starts share a process group of their own, so a
+// timeout ends every one of them, and a signal to this process reaches the group too. at a terminal
+// the command stays in this process's group, the terminal's foreground one, so a prompt of git or
+// ssh can read the terminal, and ctrl c reaches every process the command started from the terminal
+// itself. either way the signal then ends this process as it would have alone, unless a caller here
+// cleans up first. the error is only for a program that cannot start for another reason than not
+// being installed, and for that signal
 func run(o Options, stdout, stderr io.Writer, name string, args ...string) (Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), o.Timeout)
 	defer cancel()
@@ -103,8 +106,21 @@ func run(o Options, stdout, stderr io.Writer, name string, args ...string) (Resu
 	if o.Stdin != "" {
 		cmd.Stdin = strings.NewReader(o.Stdin)
 	}
-	sys.OwnGroup(cmd)
-	cmd.Cancel = func() error { return sys.KillGroup(cmd) }
+	terminal := sys.IsTerminal(os.Stdin.Fd())
+	forward, kill := sys.SignalGroup, sys.KillGroup
+	if terminal {
+		forward = func(cmd *exec.Cmd, sig os.Signal) error {
+			// the terminal sent ctrl c to the command as well, and a second one may cut its cleanup short
+			if sig == syscall.SIGINT {
+				return nil
+			}
+			return cmd.Process.Signal(sig)
+		}
+		kill = func(cmd *exec.Cmd) error { return cmd.Process.Kill() }
+	} else {
+		sys.OwnGroup(cmd)
+	}
+	cmd.Cancel = func() error { return kill(cmd) }
 	cmd.WaitDelay = 5 * time.Second
 	signals, stopCatching := catch()
 	defer stopCatching()
@@ -120,11 +136,11 @@ func run(o Options, stdout, stderr io.Writer, name string, args ...string) (Resu
 	select {
 	case err = <-done:
 	case sig := <-signals:
-		sys.SignalGroup(cmd, sig)
+		forward(cmd, sig)
 		select {
 		case <-done:
 		case <-time.After(stopGrace):
-			sys.KillGroup(cmd)
+			kill(cmd)
 			<-done
 		}
 		stopCatching()

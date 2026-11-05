@@ -14,6 +14,13 @@ clone, with MINGO_PROJECT set, or after mingo default <project>, the project may
 no role, the project's lead.
 `
 
+// a loop runs on the config it loaded, so the commands that control one reach it without a config
+// that loads
+const asWritten = `
+While a project's config does not load, its running loops go on, and a target written as
+<project>/<role> still reaches the session by those names, the role as written and not as an alias.
+`
+
 var pages = map[string]string{
 	"ls": `mingo ls
 
@@ -56,7 +63,7 @@ this start launches.
 Asks each session to exit, waits up to 90 seconds for them all, then closes the tmux session of any
 still there. A project stops every role. With no target, the default project. Every target is
 checked before any session is asked. MINGO_STOP_WAIT changes the wait, in seconds.
-` + targets,
+` + targets + asWritten,
 	"restart": `mingo restart [--force] <target>
 
 Ends a role's session where it stands: the loop types /exit within seconds and starts a fresh
@@ -65,23 +72,23 @@ the fresh one starts from.
 
   --force   for a session a question or a long turn holds: Ctrl+C first, then /exit, and the
             session's process is ended when that does not end it
-` + targets,
+` + targets + asWritten,
 	"attach": `mingo attach <target>
 
 Attaches this terminal to a role's session. Detach with Ctrl+B then D. Ctrl+C reaches the session,
 and twice, or Ctrl+D, ends it.
-` + targets,
+` + targets + asWritten,
 	"ro": `mingo ro <target>
 
 Attaches this terminal to a role's session read only: what is typed does not reach it. Detach with
 Ctrl+B then D.
-` + targets,
+` + targets + asWritten,
 	"peek": `mingo peek <target> [lines]
 
 Prints the last lines of a role's screen, 40 unless lines says otherwise.
 
   mingo peek acme/dev 80
-` + targets,
+` + targets + asWritten,
 	"say": `mingo say <target> <message>
 
 Types the message into a role's session and presses Enter, as if it were typed there. Between two
@@ -89,14 +96,15 @@ sessions nothing is typed, since it would be the next session's first input: try
 seconds.
 
   mingo say acme/dev "pull master"
-` + targets,
+` + targets + asWritten,
 	"clear": `mingo clear
 
 For a session to run as its last tool call: the role's loop ends the session within seconds and
 starts a fresh one, which goes on from the handoff. Write the handoff first, since /exit ends the
 session where it stands. The project and role come from MINGO_PROJECT and MINGO_ROLE, which the
-loop sets, or from the clone the command runs in. With no session of the role running, it says so
-and changes nothing.
+loop sets, and then the config is not read, so a config that does not load does not stop it. Else
+they come from the clone the command runs in. With no session of the role running, it says so and
+changes nothing.
 `,
 	"path": `mingo path <target>
 
@@ -310,7 +318,7 @@ They are guards against slips, not a sandbox.
 	"version": `mingo version
 
 Prints this mingo's version. A loop starts the binary on disk again at each session boundary when it
-answers this.
+answers this and takes the config, as mingo help loop says.
 `,
 	"help": `mingo help [command]
 
@@ -318,11 +326,17 @@ Explains a command, or lists them all with no command. --help or -h among a comm
 does the same, before any --.
 `,
 	"loop": `mingo loop <project> <role>
+mingo loop --check <project> <role>
 
 What mingo start runs in each session's pane: Claude Code in the role's clone, started again
 whenever a session ends. A session that ends within a minute by itself is a failed start, and the
 wait before the next one doubles, up to five minutes. A session that mingo restart or mingo clear
 ended is no failed start. mingo stop ends a loop that waits between sessions within a second.
+
+At each session boundary the loop hands over to the mingo on disk, so a rebuilt mingo takes over,
+but only when that mingo answers mingo version and takes the config. --check asks it: it prints
+what keeps it from running the loop on the config and exits 1, or exits 0. A mingo too old to
+answer --check is not handed over to.
 
 When the project's config does not load, the loop says why in its pane: at its start it tries
 again every few seconds, and at a session boundary it goes on with the config it loaded and tries
