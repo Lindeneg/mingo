@@ -2,12 +2,19 @@ does = "the checks of every pull request in .github/workflows/ci.yml, one job pe
 
 [[asks]]
 key = "ci.stack"
-question = "the stack: pnpm, npm or go"
+question = "how CI installs the project: pnpm, npm, go or other"
 default = "pnpm"
 
 [[asks]]
+key = "ci.setup"
+question = "the commands CI runs to set up the project before each check, empty for none"
+list = true
+default = ""
+when = "ci.stack=other"
+
+[[asks]]
 key = "workflow.checks"
-question = "the checks every pull request runs"
+question = "the CI jobs every pull request must pass, such as test or build"
 list = true
 default = "check, test, build, security"
 
@@ -15,4 +22,10 @@ default = "check, test, build, security"
 key = "ci.run"
 question = "the command of the check {item}"
 each = "check"
-when = "ci.stack=go"
+when = "ci.stack=go|other"
+
+[[asks]]
+key = "ci.audit"
+question = "the dependency audit the security job runs, empty for none"
+default = ""
+when = "ci.stack=other"

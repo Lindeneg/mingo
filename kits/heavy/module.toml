@@ -2,6 +2,6 @@ does = "the slots shim for Node projects in tools/heavy.mjs, and the package.jso
 
 [[asks]]
 key = "heavy.scripts"
-question = "the package.json scripts that take a slot"
+question = "the package.json scripts too heavy for every session to run at once, which then take turns"
 list = true
 default = "check, test, build, dev"

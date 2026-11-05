@@ -81,8 +81,13 @@ func (a *answers) applies(ask Ask) bool {
 	if ask.When == "" {
 		return true
 	}
-	key, value, _ := strings.Cut(ask.When, "=")
-	return a.values[key] == value
+	key, values, _ := strings.Cut(ask.When, "=")
+	for _, value := range strings.Split(values, "|") {
+		if a.values[key] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *answers) items(ask Ask) []string {
@@ -260,13 +265,13 @@ func (a *answers) toml(name, preset string, modules []string) (string, error) {
 		entries []entry
 	}{
 		{"workflow", []entry{{"base", "workflow.base"}, {"checks", "workflow.checks"}, {"gate", "workflow.gate"}, {"tags", "workflow.tags"}, {"reviewer", "workflow.reviewer"}}},
-		{"ci", []entry{{"stack", "ci.stack"}}},
+		{"ci", []entry{{"stack", "ci.stack"}, {"setup", "ci.setup"}, {"audit", "ci.audit"}}},
 		{"review", []entry{{"read", "review.read"}}},
 		{"tracker", []entry{{"kind", "tracker.kind"}, {"team", "tracker.team"}, {"project", "tracker.project"}}},
 		{"heavy", []entry{{"scripts", "heavy.scripts"}}},
 		{"ports", []entry{{"variable", "ports.variable"}}},
 	}
-	lists := map[string]bool{"workflow.checks": true, "workflow.gate": true, "workflow.tags": true, "heavy.scripts": true}
+	lists := map[string]bool{"workflow.checks": true, "workflow.gate": true, "workflow.tags": true, "ci.setup": true, "heavy.scripts": true}
 	for _, t := range tables {
 		var lines []string
 		for _, e := range t.entries {

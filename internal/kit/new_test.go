@@ -123,11 +123,55 @@ func TestNewKeepsClaudesFilesLocalWhenAskedAndTheReviewThenReadsTheReadme(t *tes
 	if err != nil || !strings.Contains(text, "\nclaude_files = \"local\"\n") || !strings.Contains(text, "\nread = \"README.md first\"\n") {
 		t.Fatal(text, err)
 	}
-	if !strings.Contains(strings.Join(asked, "\n"), "what the review reads first [README.md first]") || !project(t, text).ClaudeLocal() {
+	if !strings.Contains(strings.Join(asked, "\n"), "what the AI review of each pull request reads before the diff [README.md first]") || !project(t, text).ClaudeLocal() {
 		t.Fatal(asked)
 	}
 	kept, err := k.New("demo", "solo", map[string][]string{"--repo": {"x/demo"}, "--claude-files": {"repo"}}, noTerminal)
 	if err != nil || strings.Contains(kept, "claude_files") || !strings.Contains(kept, "\nread = \"CLAUDE.md first\"\n") {
 		t.Fatal(kept, err)
+	}
+}
+
+func TestNewAsksTheStackOtherForItsSetupEachChecksCommandAndItsAudit(t *testing.T) {
+	k, _ := LoadEmbedded()
+	var asked []string
+	prompt := func(q, def string) (string, bool) {
+		asked = append(asked, q+" ["+def+"]")
+		switch q {
+		case "the GitHub repository, as owner/name":
+			return "x/demo", true
+		case "how CI installs the project: pnpm, npm, go or other":
+			return "other", true
+		case "the commands CI runs to set up the project before each check, empty for none":
+			return "make deps, make tools", true
+		case "the CI jobs every pull request must pass, such as test or build":
+			return "test, security", true
+		case "the command of the check test":
+			return "make test", true
+		case "the dependency audit the security job runs, empty for none":
+			return "make audit", true
+		}
+		return "", true
+	}
+	text, err := k.New("demo", "solo", nil, prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "[ci]\nstack = \"other\"\nsetup = [\"make deps\", \"make tools\"]\naudit = \"make audit\"\n\n[ci.run]\ntest = \"make test\"\n") {
+		t.Fatal(text)
+	}
+	if p := project(t, text); p.CI.Audit != "make audit" || len(p.CI.Setup) != 2 {
+		t.Fatal(p.CI)
+	}
+	bare, err := k.New("demo", "solo", map[string][]string{"--repo": {"x/demo"}, "--ci-stack": {"other"}, "--workflow-checks": {"test"}, "--ci-run": {"test=make test"}}, noTerminal)
+	if err != nil || strings.Contains(bare, "setup") || strings.Contains(bare, "audit") {
+		t.Fatal(bare, err)
+	}
+	asked = nil
+	if _, err := k.New("demo", "solo", map[string][]string{"--repo": {"x/demo"}}, func(q, def string) (string, bool) { asked = append(asked, q); return "", true }); err != nil {
+		t.Fatal(err)
+	}
+	if all := strings.Join(asked, "\n"); strings.Contains(all, "set up the project") || strings.Contains(all, "dependency audit") || strings.Contains(all, "the command of the check") {
+		t.Fatal(all)
 	}
 }

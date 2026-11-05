@@ -49,6 +49,8 @@ type Tracker struct {
 
 type CI struct {
 	Stack string            `toml:"stack"`
+	Setup []string          `toml:"setup"`
+	Audit string            `toml:"audit"`
 	Run   map[string]string `toml:"run"`
 }
 
@@ -176,14 +178,22 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 	}
 	switch p.CI.Stack {
 	case "", "pnpm", "npm":
-	case "go":
+	case "go", "other":
 		for _, check := range w.Checks {
 			if check != "security" && p.CI.Command(check) == "" {
 				return fmt.Errorf("%s has the check %s with no command, name it in [ci.run]", p.File, check)
 			}
 		}
 	default:
-		return fmt.Errorf("%s has the stack %s, use pnpm, npm or go", p.File, p.CI.Stack)
+		return fmt.Errorf("%s has the stack %s, use pnpm, npm, go or other", p.File, p.CI.Stack)
+	}
+	if p.CI.Stack != "other" {
+		if len(p.CI.Setup) > 0 {
+			return fmt.Errorf("%s has [ci] setup, which is for the stack other", p.File)
+		}
+		if p.CI.Audit != "" {
+			return fmt.Errorf("%s has [ci] audit, which is for the stack other", p.File)
+		}
 	}
 	switch p.Tracker.Kind {
 	case "":
