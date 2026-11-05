@@ -158,8 +158,10 @@ gate = ["pnpm check", "pnpm test", "pnpm build"]  # run without a shell, so no &
 tags = ["(lead)", "(dev)"]         # the role tags a description starts with
 reviewer = "claude[bot]"           # whose review comments count, anyone's by default
 local_runs = ["pnpm check", "mingo gate"]
-generate_list = ["pnpm exec tsx tools/generate.ts --list"]   # these two without a shell too
-generate = ["pnpm generate"]
+# generate_list names the generated files and generate writes them again, for mingo pr rebase. They
+# run in a fresh checkout without the clone's installed dependencies, so they must run without them
+generate_list = ["node tools/generate.mjs --list"]   # these two without a shell too
+generate = ["node tools/generate.mjs"]
 generated = '^generate: wrote (.+)$'
 # review_line, no_findings, review_heading, footers and trailers tell the review comment and
 # attribution apart, and default to "review:", "no findings", "## Review", Claude Code's footer

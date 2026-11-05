@@ -597,13 +597,77 @@ func TestRunMergePrintsEveryHeldPointAndDoesNotMerge(t *testing.T) {
 }
 
 func TestRunMergeSaysWhenGHIsNotLoggedInAndReadsNothing(t *testing.T) {
-	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"auth status": {Code: 1, Stderr: "You are not logged into any GitHub hosts."}})
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"auth status": {Code: 1, Stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login\n"}})
 	if code := g.merge("41"); code != ExitFailed {
 		t.Fatal(code)
 	}
-	equal(t, g.printed(), []string{"gh is not logged in to GitHub: run `gh auth login`, then try again"})
+	equal(t, g.printed(), []string{"checking gh's login to github.com failed:", "You are not logged into any GitHub hosts. To log in, run: gh auth login"})
 	if len(g.calls) != 1 {
 		t.Fatal(g.calls)
+	}
+}
+
+func TestRunMergeChecksOnlyTheAccountGHUsesForGitHub(t *testing.T) {
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), nil)
+	g.merge("41")
+	if !reflect.DeepEqual(g.calls[0], []string{"gh", "auth", "status", "--active", "--hostname", "github.com"}) {
+		t.Fatal(g.calls[0])
+	}
+}
+
+func TestRunMergeNamesTheTimeoutOfTheLoginCheck(t *testing.T) {
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"auth status": {TimedOut: true}})
+	if code := g.merge("41"); code != ExitFailed {
+		t.Fatal(code)
+	}
+	equal(t, g.printed(), []string{"checking gh's login to github.com did not finish in 60 seconds"})
+}
+
+// the state read after a merge call answers with the given state
+func (g *fakeGH) stateAfterMerge(state string) {
+	run := g.deps.Run
+	g.deps.Run = func(o Options, name string, args ...string) (Result, error) {
+		if len(args) == 5 && args[0] == "pr" && args[1] == "view" && args[4] == "state" {
+			g.calls = append(g.calls, append([]string{name}, args...))
+			return Result{Stdout: `{"state": "` + state + `"}`}, nil
+		}
+		return run(o, name, args...)
+	}
+}
+
+func TestRunMergeSaysTheMergeStandsWhenOnlyDeletingTheBranchFailed(t *testing.T) {
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"pr merge": {Code: 1, Stderr: "failed to delete local branch feature: error: cannot delete branch 'feature'\n"}})
+	g.stateAfterMerge("MERGED")
+	if code := g.merge("41"); code != ExitOK {
+		t.Fatal(code, g.printed())
+	}
+	equal(t, g.printed()[1:], []string{
+		"merged: tools: the team scripts (#41)",
+		"deleting the branch failed, delete it by hand:",
+		"failed to delete local branch feature: error: cannot delete branch 'feature'",
+		"shared files touched: none",
+	})
+}
+
+func TestRunMergeSaysTheMergeStandsWhenGHTimesOutAfterIt(t *testing.T) {
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"pr merge": {TimedOut: true}})
+	g.stateAfterMerge("MERGED")
+	if code := g.merge("41"); code != ExitOK {
+		t.Fatal(code, g.printed())
+	}
+	if p := g.printed(); p[1] != "merged: tools: the team scripts (#41)" || p[2] != "gh did not finish in 60 seconds after the merge, so the branch may be left: delete it by hand if it is" {
+		t.Fatal(p)
+	}
+}
+
+func TestRunMergeSaysTheMergeFailedWhenThePullRequestIsStillOpenAfterIt(t *testing.T) {
+	g := newFakeGH(t, newMergeCase(t).p, facts(nil), map[string]Result{"pr merge": {TimedOut: true}})
+	g.stateAfterMerge("OPEN")
+	if code := g.merge("41"); code != ExitFailed {
+		t.Fatal(code)
+	}
+	if p := g.printed(); p[len(p)-1] != "the merge did not finish in 60 seconds" || strings.Contains(g.out.String(), "merged:") {
+		t.Fatal(p)
 	}
 }
 

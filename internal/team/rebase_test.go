@@ -748,6 +748,16 @@ func TestRebaseRefusesABranchOriginDoesNotHaveAndMasterItself(t *testing.T) {
 	r.expectClean("master")
 }
 
+func TestRebaseSaysWhenOriginHasNoBranchOfTheBaseAndWhereTheBaseIsSet(t *testing.T) {
+	r := setUpRepo(t, nil)
+	r.project = loadProject(t, "acme", "[workflow]\nbase = \"main\"\n[[roles]]\nname = \"lead\"\n")
+	if code := r.rebase("feature"); code != ExitFailed {
+		t.Fatal(code)
+	}
+	equal(t, r.printed(), []string{"origin has no branch main: set [workflow] base in " + r.project.File + " to a branch origin has"})
+	r.expectClean("master")
+}
+
 func TestRebaseRefusesWrongArguments(t *testing.T) {
 	r := setUpRepo(t, nil)
 	for _, args := range [][]string{nil, {"a", "b"}, {"--force"}} {

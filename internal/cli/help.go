@@ -228,7 +228,8 @@ merge and mingo help pr rebase say more.
 	"pr merge": `mingo pr merge <number>
 
 Checks a ready pull request and squash merges it with its branch deleted, only when nothing holds
-it. It holds a pull request:
+it. It first checks that gh is logged in to github.com with the account it uses there, and shows
+what gh says when it is not. It holds a pull request:
   with a required check of [workflow] checks that is not green on the head
   with no review comment on the head that says no findings, from [workflow] reviewer when set
   with an unresolved thread, or a branch behind the base
@@ -237,24 +238,29 @@ it. It holds a pull request:
 Under the ci-unavailable label, the description's record of the local run, the review heading and
 the head's short sha stand in for the checks and the review. It prints every held point, numbered.
 The merge has an empty body, so no commit trailer of the branch reaches the base, and it names the
-shared files the merge touched, for the notice to the others. It never approves, dismisses or
-greens anything.
+shared files the merge touched, for the notice to the others. When the merge went through but
+deleting the branch failed, it says merged and shows gh's error, for the branch to be deleted by
+hand. It never approves, dismisses or greens anything.
 `,
 	"pr rebase": `mingo pr rebase <branch>
 
 Rebases a branch onto the base in a worktree of its own, so the clone it runs in keeps its files,
 and pushes it, only over the head it fetched. A conflict in a shared list of [[workflow.shared]]
 keeps both sides, or takes what one side alone made of an entry. A generated file both sides
-changed is made again by the project's generators. It says whether the base brought code into files
-the branch touches, which asks for the full gate again. Any other conflict stops it with the file
-named and nothing pushed.
+changed is made again by the project's generators. They run in that worktree, a fresh checkout
+without the dependencies installed in the clone, so they must run without them. It says whether
+the base brought code into files the branch touches, which asks for the full gate again. Any other
+conflict stops it with the file named and nothing pushed. Ctrl+C, SIGTERM or SIGHUP stops it at
+once, removes its worktree and exits non-zero.
 `,
 	"gate": `mingo gate <log>
 
 Runs the project's [workflow] gate commands in order, without a shell, with their output in the log,
-and stops at the first red one, exiting 1. A gate command with &&, a pipe, a redirect or quotes is
-refused when the config loads: such a line goes in a package script or a script file. One line a command says green or red and how long it
-took. A log path that is not absolute starts at the repository's root.
+and stops at the first red one, exiting 1. One line a command says green or red and how long it
+took. A command still running after 30 minutes is red, and it is ended with every process it
+started. A log path that is not absolute starts at the repository's root. A gate command with &&,
+a pipe, a redirect or quotes is refused when the config loads: such a line goes in a package script
+or a script file.
 `,
 	"install": `mingo install
 
@@ -268,11 +274,14 @@ Sets up this machine for mingo, and changes nothing when run again:
 	"heavy": `mingo heavy <label> -- <command...>
 
 Runs a heavy command, such as a check, the tests or a build, in one of the machine's slots, which
-every project shares. It waits while every slot is taken, or while another command holds one and
-less free memory than the least is left, and a command beside another starts only after that one
-has run a while. It says who holds the slots while it waits. A command started by one that holds a
-slot runs at once, a slot whose command died is taken back, and SIGTERM and SIGHUP reach the
-command. The label names the command to the ones that wait.
+every project shares. A command that is not on PATH fails at once, before any wait. It waits while
+every slot is taken, or while another command holds one and less free memory than the least is
+left, and a command beside another starts only after that one has run a while. It says which of
+these it waits for and who holds the slots. A command started by one that holds a slot runs at
+once, and SIGTERM and SIGHUP reach the command. A slot is held while mingo heavy or its command
+runs, so a command that outlives a killed mingo heavy keeps its slot, and a slot whose command died
+is taken back. On Linux the command is sent SIGTERM when mingo heavy is killed. The label names the
+command to the ones that wait.
 
   MINGO_HEAVY_SLOTS        the slots, 2 unless set
   MINGO_HEAVY_MIN_FREE_MB  the least free memory beside another command, 5000 unless set
@@ -309,7 +318,14 @@ does the same, before any --.
 	"loop": `mingo loop <project> <role>
 
 What mingo start runs in each session's pane: Claude Code in the role's clone, started again
-whenever a session ends. It is not for running by hand.
+whenever a session ends. A session that ends within a minute by itself is a failed start, and the
+wait before the next one doubles, up to five minutes. A session that mingo restart or mingo clear
+ended is no failed start. mingo stop ends a loop that waits between sessions within a second.
+
+When the project's config does not load, the loop says why in its pane: at its start it tries
+again every few seconds, and at a session boundary it goes on with the config it loaded and tries
+again at the next one. When claude cannot be found, it says so and looks again every few seconds.
+It is not for running by hand.
 `,
 }
 

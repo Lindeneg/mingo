@@ -300,3 +300,24 @@ func TestMergeJSONKeysStopsOnAVersionThatIsNotAJSONObject(t *testing.T) {
 		t.Fatal("merged")
 	}
 }
+
+func TestMergeJSONKeysKeepsTheFilesIndentItsEscapesAndItsLackOfAFinalNewline(t *testing.T) {
+	base := "{\n    \"a\": \"1\",\n    \"b\": \"caf\\u00e9\"\n}"
+	ours := "{\n    \"a\": \"1\",\n    \"b\": \"caf\\u00e9\",\n    \"c\": \"3\"\n}"
+	theirs := "{\n    \"a\": \"1\",\n    \"b\": \"caf\\u00e9\",\n    \"d\": \"4\"\n}"
+	same(t, MergeJSONKeys(&base, ours, theirs), Outcome{Text: "{\n    \"a\": \"1\",\n    \"b\": \"caf\\u00e9\",\n    \"c\": \"3\",\n    \"d\": \"4\"\n}", Took: took(Additions)})
+}
+
+func TestMergeJSONKeysKeepsTabsCRLFLineEndsAndEachValueAsItsSideWroteIt(t *testing.T) {
+	base := "{\r\n\t\"a\": \"é\"\r\n}\r\n"
+	ours := "{\r\n\t\"a\": \"é\",\r\n\t\"m\": [1, 2.50]\r\n}\r\n"
+	theirs := "{\r\n\t\"a\": \"é\",\r\n\t\"f\":{\"x\": \"\\u00e9\"}\r\n}\r\n"
+	same(t, MergeJSONKeys(&base, ours, theirs), Outcome{Text: "{\r\n\t\"a\": \"é\",\r\n\t\"m\": [1, 2.50],\r\n\t\"f\":{\"x\": \"\\u00e9\"}\r\n}\r\n", Took: took(Additions)})
+}
+
+func TestMergeJSONKeysTakesTheOtherSidesTextOfAKeyOnlyItChanged(t *testing.T) {
+	base := "{\n  \"a\": \"1\",\n  \"b\": \"2\"\n}\n"
+	ours := "{\n  \"a\": \"1\",\n  \"b\": \"2\",\n  \"m\": \"M\"\n}\n"
+	theirs := "{\n  \"a\": \"caf\\u00e9\",\n  \"b\": \"2\"\n}\n"
+	same(t, MergeJSONKeys(&base, ours, theirs), Outcome{Text: "{\n  \"a\": \"caf\\u00e9\",\n  \"b\": \"2\",\n  \"m\": \"M\"\n}\n", Took: took(Additions, SecondRewrite)})
+}

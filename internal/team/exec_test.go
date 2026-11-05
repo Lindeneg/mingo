@@ -26,6 +26,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stdout, "to stdout")
 		fmt.Fprintln(os.Stderr, "to stderr")
 		os.Exit(2)
+	case "group":
+		Capture(Options{Timeout: time.Minute}, "sh", "-c", `sleep 600 & echo $! >"$1"; wait`, "_", os.Getenv("TEAM_FILE"))
+		os.Exit(0)
 	}
 	code := m.Run()
 	if templateDir != "" {

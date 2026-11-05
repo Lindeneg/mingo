@@ -35,7 +35,8 @@ func newSlots(t *testing.T) *slots {
 }
 
 func (sl *slots) take(label string) int {
-	return Take(sl.dir, label, sl.s, sl.me)
+	n, _ := Take(sl.dir, label, sl.s, sl.me)
+	return n
 }
 
 func sleeper(t *testing.T) int {
@@ -174,6 +175,81 @@ func TestReleasesOnlyItsOwnSlot(t *testing.T) {
 	Release(sl.dir, 2, sl.me.Pid)
 	if _, err := os.Stat(slotFile(sl.dir, 2)); !os.IsNotExist(err) {
 		t.Fatal("own slot kept")
+	}
+}
+
+func TestTakeSaysWhyACommandWaits(t *testing.T) {
+	sl := newSlots(t)
+	sl.holder(1, ago(0), "check")
+	if n, why := Take(sl.dir, "early", sl.s, sl.me); n != 0 || why != Ramping {
+		t.Fatal(n, why)
+	}
+	sl.holder(1, ago(120), "check")
+	FreeMB = func() (int, error) { return 10, nil }
+	if n, why := Take(sl.dir, "beside", sl.s, sl.me); n != 0 || why != LowMemory {
+		t.Fatal(n, why)
+	}
+	sl.holder(2, ago(120), "test")
+	if n, why := Take(sl.dir, "third", sl.s, sl.me); n != 0 || why != AllTaken {
+		t.Fatal(n, why)
+	}
+}
+
+func TestTheWaitLineNamesTheReasonAndTheHolders(t *testing.T) {
+	sl := newSlots(t)
+	pid := sl.holder(1, ago(5), "build")
+	FreeMB = func() (int, error) { return 3000, nil }
+	held := fmt.Sprintf("build (pid %d, ", pid)
+	for why, want := range map[Wait]string{
+		AllTaken:  "check waits for a slot, every slot is taken: " + held,
+		Ramping:   "check waits for a slot, a command starts beside another only once that one has run 60 s: " + held,
+		LowMemory: "check waits for a slot, free memory is 3000 MB, under the 5000 MB a command needs beside " + held,
+	} {
+		if got := waitLine("check", why, sl.dir, sl.s); !strings.HasPrefix(got, want) || strings.HasSuffix(got, ", ") {
+			t.Fatalf("%q", got)
+		}
+	}
+}
+
+func TestASlotStaysHeldWhileItsCommandRunsAfterMingoHeavyIsGone(t *testing.T) {
+	sl := newSlots(t)
+	cmd := sleeper(t)
+	start, err := sys.ProcStart(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sl.write(1, fmt.Sprintf("%d %d check\n\n%d %s\n", deadPid(t), ago(120), cmd, start))
+	if n := sl.take("next"); n != 2 {
+		t.Fatal(n)
+	}
+	if out := Holders(sl.dir); !strings.HasPrefix(out, fmt.Sprintf("check (pid %d, ", cmd)) {
+		t.Fatal(out)
+	}
+	os.Remove(slotFile(sl.dir, 2))
+	sl.write(1, fmt.Sprintf("%d %d check\n\n%d 1\n", deadPid(t), ago(120), cmd))
+	if n := sl.take("next"); n != 1 {
+		t.Fatal("a slot whose command pid was given to another process is held", n)
+	}
+}
+
+func TestHoldWritesTheCommandsPidIntoItsOwnSlotOnly(t *testing.T) {
+	sl := newSlots(t)
+	if n := sl.take("check"); n != 1 {
+		t.Fatal(n)
+	}
+	cmd := sleeper(t)
+	Hold(sl.dir, 1, Self{Pid: sl.me.Pid + 1}, cmd)
+	if h, _ := readHolder(slotFile(sl.dir, 1)); h.cmd != 0 {
+		t.Fatal("another's slot was written", h)
+	}
+	Hold(sl.dir, 1, sl.me, cmd)
+	start, _ := sys.ProcStart(cmd)
+	h, ok := readHolder(slotFile(sl.dir, 1))
+	if !ok || h.pid != sl.me.Pid || h.label != "check" || h.start != sl.me.Start || h.cmd != cmd || h.cmdStart != start {
+		t.Fatal(h)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(sl.dir, ".slot-*")); len(matches) != 0 {
+		t.Fatal(matches)
 	}
 }
 

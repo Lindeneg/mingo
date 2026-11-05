@@ -109,10 +109,25 @@ type RebaseDeps struct {
 
 type rebaser struct {
 	RebaseDeps
-	base string
+	base    string
+	signals chan os.Signal
+	pushing bool
+}
+
+// a signal between two commands waits here, so the rebase ends at the next one and cleans up
+func (r *rebaser) interrupted() error {
+	select {
+	case sig := <-r.signals:
+		return &Interrupted{Signal: sig}
+	default:
+		return nil
+	}
 }
 
 func (r *rebaser) git(cwd string, args ...string) (Result, error) {
+	if err := r.interrupted(); err != nil {
+		return Result{}, err
+	}
 	res, err := r.Run(Options{Dir: cwd, Timeout: GitTimeout, Env: []string{"GIT_EDITOR=true", "GIT_TERMINAL_PROMPT=0"}}, "git", args...)
 	if err != nil {
 		return res, err
@@ -479,7 +494,23 @@ func Rebase(d RebaseDeps, args []string) (int, error) {
 		return ExitUsage, nil
 	}
 	r := &rebaser{RebaseDeps: d, base: d.Project.Workflow.Base}
+	signals, stopCatching := catch()
+	cleaning.Add(1)
+	defer func() {
+		cleaning.Add(-1)
+		stopCatching()
+	}()
+	r.signals = signals
 	err := r.rebase(args[0])
+	var in *Interrupted
+	if errors.As(err, &in) {
+		if r.pushing {
+			fmt.Fprintf(d.Out, "the rebase was stopped by %s during the push; run git fetch to see whether %s took it\n", signalName(in.Signal), Remote)
+		} else {
+			fmt.Fprintf(d.Out, "the rebase was stopped by %s; nothing was pushed\n", signalName(in.Signal))
+		}
+		return in.Code(), nil
+	}
 	var s *Stop
 	if errors.As(err, &s) {
 		fmt.Fprintln(d.Out, s.Message)
@@ -498,6 +529,14 @@ func (r *rebaser) rebase(branch string) (err error) {
 	if _, err := r.must(r.Root, "fetching "+Remote, "fetch", "--prune", Remote); err != nil {
 		return err
 	}
+	baseFound, err := r.git(r.Root, "rev-parse", "--verify", "--quiet", "refs/remotes/"+Remote+"/"+r.base)
+	if err != nil {
+		return err
+	}
+	if baseFound.Code != 0 {
+		return stop(fmt.Sprintf("%s has no branch %s: set [workflow] base in %s to a branch %s has", Remote, r.base, r.Project.File, Remote))
+	}
+	master := strings.TrimSpace(baseFound.Stdout)
 	found, err := r.git(r.Root, "rev-parse", "--verify", "--quiet", "refs/remotes/"+Remote+"/"+branch)
 	if err != nil {
 		return err
@@ -506,12 +545,7 @@ func (r *rebaser) rebase(branch string) (err error) {
 		return stop(Remote + " has no branch " + branch)
 	}
 	oldHead := strings.TrimSpace(found.Stdout)
-	out, err := r.must(r.Root, "reading "+r.base, "rev-parse", "refs/remotes/"+Remote+"/"+r.base)
-	if err != nil {
-		return err
-	}
-	master := strings.TrimSpace(out)
-	out, err = r.must(r.Root, "finding the fork point", "merge-base", master, oldHead)
+	out, err := r.must(r.Root, "finding the fork point", "merge-base", master, oldHead)
 	if err != nil {
 		return err
 	}
@@ -578,6 +612,10 @@ func (r *rebaser) rebase(branch string) (err error) {
 	if newHead == master {
 		return stop("every commit of " + branch + " is on " + r.base + " already; nothing was pushed")
 	}
+	if err := r.interrupted(); err != nil {
+		return err
+	}
+	r.pushing = true
 	push, err := r.git(tree, "push", "--force-with-lease=refs/heads/"+branch+":"+oldHead, Remote, "HEAD:refs/heads/"+branch)
 	if err != nil {
 		return err

@@ -283,6 +283,44 @@ func parseObject(text string) *ojson.Object {
 	return o
 }
 
+// the object with the text of each member as the file wrote it
+func parseMembers(text string) (*ojson.Object, map[string]string) {
+	members, err := ojson.Members([]byte(text))
+	if err != nil {
+		return nil, nil
+	}
+	o, texts := ojson.NewObject(), map[string]string{}
+	for _, m := range members {
+		o.Set(m.Key, m.Value)
+		texts[m.Key] = m.Text
+	}
+	return o, texts
+}
+
+// the merged members laid out as ours is, with its indent, its line ends and what follows its
+// closing brace, each member as the side it came from wrote it
+func jsonFile(ours string, order []string, texts map[string]string) string {
+	end := ours[len(strings.TrimRight(ours, " \t\r\n")):]
+	if len(order) == 0 {
+		return "{}" + end
+	}
+	newline := "\n"
+	if strings.Contains(ours, "\r\n") {
+		newline = "\r\n"
+	}
+	indent := ojson.Indent([]byte(ours))
+	var b strings.Builder
+	b.WriteString("{")
+	for i, k := range order {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(newline + indent + texts[k])
+	}
+	b.WriteString(newline + "}" + end)
+	return b.String()
+}
+
 func jsonText(v any) []byte {
 	data, err := ojson.Marshal(v)
 	if err != nil {
@@ -308,14 +346,16 @@ func MergeJSONKeys(base *string, ours, theirs string) Outcome {
 	if base != nil {
 		baseObject = parseObject(*base)
 	}
-	oursObject, theirsObject := parseObject(ours), parseObject(theirs)
+	oursObject, oursTexts := parseMembers(ours)
+	theirsObject, theirsTexts := parseMembers(theirs)
 	if baseObject == nil || oursObject == nil || theirsObject == nil {
 		return edited("a version of the file is not a JSON object")
 	}
 	order := slices.Clone(oursObject.Keys())
-	values := map[string]any{}
+	values, texts := map[string]any{}, map[string]string{}
 	for _, k := range order {
 		values[k], _ = oursObject.Get(k)
+		texts[k] = oursTexts[k]
 	}
 	took := takenSet{}
 	for _, k := range order {
@@ -342,7 +382,7 @@ func MergeJSONKeys(base *string, ours, theirs string) Outcome {
 			took[SharedRewrite] = true
 		}
 		if v, ok := theirsObject.Get(key); ok {
-			values[key] = v
+			values[key], texts[key] = v, theirsTexts[key]
 		} else if _, ok := values[key]; ok {
 			delete(values, key)
 			order = slices.Delete(order, slices.Index(order, key), slices.Index(order, key)+1)
@@ -373,11 +413,7 @@ func MergeJSONKeys(base *string, ours, theirs string) Outcome {
 		}
 		order = slices.Insert(order, at, key)
 		values[key], _ = theirsObject.Get(key)
+		texts[key] = theirsTexts[key]
 	}
-
-	merged := ojson.NewObject()
-	for _, k := range order {
-		merged.Set(k, values[k])
-	}
-	return Outcome{Text: string(jsonText(merged)), Took: took.inOrder()}
+	return Outcome{Text: jsonFile(ours, order, texts), Took: took.inOrder()}
 }
