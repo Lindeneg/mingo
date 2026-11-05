@@ -4,8 +4,13 @@ checks = ["labels", "linear"]
 
 [[asks]]
 key = "tracker.kind"
-question = "the tracker: linear, github or none"
+question = "the tracker"
 default = "github"
+choices = [
+    { value = "linear", hint = "Linear issues, named by the team's key" },
+    { value = "github", hint = "GitHub Issues, with a label per role" },
+    { value = "none", hint = "no tracker" },
+]
 
 [[asks]]
 key = "tracker.team"

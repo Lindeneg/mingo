@@ -83,8 +83,10 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 |---|---|
 | bare | sessions and guards |
 | solo | bare with one role, plus workflow, ci and review |
-| team | solo with more roles, plus team, tracker, rules and heavy |
-| full | everything |
+| team | solo with any roles, plus skills, team, tracker, rules, and heavy for Node |
+| full | everything, heavy only for Node |
+
+At a terminal `mingo new` asks for what its flags leave out, checks each answer as it is given, and says what it will do before it writes anything. Without a terminal the flags and the defaults are all it has.
 
 | Module | Gives you |
 |---|---|

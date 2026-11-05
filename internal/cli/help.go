@@ -323,14 +323,24 @@ func (e *env) newPage() string {
 	b.WriteString(`mingo new <name> --preset <preset> [--<key> <value>]...
 
 Makes a project in one go: writes its config from the preset and the answers, then sets it up as
-mingo setup does and lands its files as mingo apply does. Its repository must exist on GitHub. A
-flag is named after its config key. A terminal is asked for what the flags leave out, and without
-one an answer with no default stops it.
+mingo setup does and lands its files as mingo apply does. Its repository must exist on GitHub, which
+mingo new checks with gh before it writes anything. A flag is named after its config key and is
+given as --key value or --key=value.
 
-  bare   sessions and guards
-  solo   bare with one role, plus workflow, ci and review
-  team   solo with any roles, plus team, tracker, rules and heavy
-  full   every module
+At a terminal mingo new asks for what the flags leave out, with a list to pick from where the
+answers are few, checks each answer as it is given and asks again when it is wrong, then says what
+it will do and asks to continue. Until then Ctrl+C stops it with nothing written. Without a terminal
+the flags and the defaults are all it has, and a wrong or missing answer stops it before it writes
+anything.
+`)
+	for i, p := range kit.Presets {
+		fmt.Fprintf(&b, "\n  %-5s  %s", p, kit.PresetHints[i])
+	}
+	b.WriteString(`
+
+heavy is left out on a stack other than pnpm or npm, or when the repository's default branch has no
+package.json, and each heavy script must be one of its scripts. tracker is left out with the tracker
+none.
 `)
 	k, err := kit.LoadEmbedded()
 	if err != nil {
@@ -356,6 +366,9 @@ one an answer with no default stops it.
 				}
 				if a.List {
 					says += ", separated by commas"
+				}
+				if values := a.Values(); len(values) > 0 {
+					says += ", one of " + strings.Join(values[:len(values)-1], ", ") + " or " + values[len(values)-1]
 				}
 				if a.Default != nil && *a.Default != "" {
 					says += ", " + defaultText(*a.Default)

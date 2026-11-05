@@ -135,6 +135,8 @@ echo "$*" >>"$state/calls"
 list() { [ -s "$state/$1" ] && sed 's/.*/{"name":"&"}/' "$state/$1" | paste -sd, | sed 's/^/[/;s/$/]/' || echo '[]'; }
 case "$1 $2" in
   "auth status"|"auth setup-git") exit 0 ;;
+  "repo view") [ "$3" = x/demo ] && exit 0; echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1 ;;
+  "api -H") git --git-dir=`+shellQuote(origin)+` show HEAD:package.json 2>/dev/null || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; } ;;
   "repo clone") exec git clone --quiet `+shellQuote(origin)+` "$4" ;;
   "label list") list labels ;;
   "label create") echo "$3" >>"$state/labels" ;;
@@ -264,14 +266,5 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 	}
 	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  Claude's files in dev's clone\n    in place: Claude's files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
 		t.Fatal(r.out)
-	}
-}
-
-func TestNewTakesBackAConfigThatDoesNotLoad(t *testing.T) {
-	h := newHome(t)
-	file := filepath.Join(h.config, "projects", "demo.toml")
-	r := h.mingo("new", "demo", "--preset", "bare", "--repo", "x/demo", "--roles", "Lead")
-	if r.code == 0 || !strings.Contains(r.out, `has a role named "Lead"`) || strings.Contains(r.out, "config: ") || exists(file) {
-		t.Fatal(r.code, r.out)
 	}
 }

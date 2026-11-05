@@ -126,75 +126,129 @@ func (e *env) secret(args []string) error {
 
 const newUsage = "new <name> [--preset bare|solo|team|full] [--<key> <value>]"
 
-func (e *env) newProject(args []string) error {
-	if len(args) == 0 || !config.IsName(args[0]) {
-		return errors.New(newUsage)
+// the flags after the name, each with its value, or true when one of them asks for help
+func newFlags(args []string) (map[string][]string, bool, error) {
+	for _, arg := range args {
+		if isHelp(arg) {
+			return nil, true, nil
+		}
 	}
-	name := args[0]
 	flags := map[string][]string{}
-	for i := 1; i < len(args); i++ {
+	for i := 0; i < len(args); i++ {
 		flag := args[i]
-		if !strings.HasPrefix(flag, "--") {
-			return errors.New(newUsage)
+		if !strings.HasPrefix(flag, "--") || flag == "--" {
+			return nil, false, fmt.Errorf("%q is not a flag, mingo new takes the name and then --<key> <value> flags", flag)
 		}
 		if k, v, ok := strings.Cut(flag, "="); ok {
 			flags[k] = append(flags[k], v)
 			continue
 		}
-		if i+1 >= len(args) {
-			return fmt.Errorf("%s needs a value", flag)
+		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+			return nil, false, fmt.Errorf("%s needs a value", flag)
 		}
 		flags[flag] = append(flags[flag], args[i+1])
 		i++
 	}
+	return flags, false, nil
+}
+
+const stoppedNew = "stopped, nothing was written"
+
+func (e *env) newProject(args []string) error {
+	if len(args) == 0 {
+		return errors.New(newUsage)
+	}
+	name := args[0]
+	if !config.IsName(name) {
+		return fmt.Errorf("%q is not a project name, use lowercase letters, digits and hyphens", name)
+	}
+	flags, help, err := newFlags(args[1:])
+	if help {
+		return e.help([]string{"new"})
+	}
+	if err != nil {
+		return err
+	}
 	file := config.File(name)
+	if known, ok := config.NameOf(name); ok && known != name {
+		return fmt.Errorf("%s is the id of the project %s, pick another name", name, known)
+	}
 	if _, err := os.Stat(file); err == nil {
-		return fmt.Errorf("%s exists, mingo new makes a project that does not", file)
+		return fmt.Errorf("%s is already a project, its config is %s", name, file)
 	}
 	k, err := kit.LoadEmbedded()
 	if err != nil {
 		return err
 	}
-	in := bufio.NewReader(os.Stdin)
-	terminal := sys.IsTerminal(os.Stdin.Fd())
-	prompt := func(question, def string) (string, bool) {
-		if !terminal {
-			return "", false
-		}
-		if def != "" {
-			fmt.Fprintf(e.out, "%s [%s]: ", question, def)
-		} else {
-			fmt.Fprintf(e.out, "%s: ", question)
-		}
-		line, _ := in.ReadString('\n')
-		return strings.TrimSpace(line), true
+	d := kit.NewDeps{Run: team.Capture, Out: e.out}
+	var prompter *sys.Prompter
+	if sys.IsTerminal(os.Stdin.Fd()) {
+		prompter = sys.NewPrompter(os.Stdin, os.Stdout)
+		d.Ask = prompter
 	}
-	preset := ""
-	if v := flags["--preset"]; len(v) > 0 {
-		preset = v[0]
-	} else if v, ok := prompt("the preset: "+strings.Join(kit.Presets, ", "), ""); ok {
-		preset = v
-	} else {
-		return errors.New("mingo new needs --preset, one of " + strings.Join(kit.Presets, " "))
+	// until the config is written a signal ends mingo new with nothing written and the terminal as it was
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	writing := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-signals:
+			if prompter != nil {
+				prompter.Restore()
+			}
+			fmt.Fprintf(e.err, "mingo: %s\n", stoppedNew)
+			code := 130
+			if s, ok := sig.(syscall.Signal); ok {
+				code = 128 + int(s)
+			}
+			os.Exit(code)
+		case <-writing:
+		}
+	}()
+	stopped := func() error {
+		fmt.Fprintf(e.err, "mingo: %s\n", stoppedNew)
+		return exitError(130)
 	}
-	text, err := k.New(name, preset, flags, prompt)
+	made, err := k.New(name, flags, d)
+	if errors.Is(err, sys.ErrStopped) {
+		return stopped()
+	}
 	if err != nil {
 		return err
 	}
+	if prompter != nil {
+		fmt.Fprint(e.out, made.Next(file))
+		yes, err := prompter.Confirm("Continue?")
+		if errors.Is(err, sys.ErrStopped) {
+			return stopped()
+		}
+		if err != nil {
+			return err
+		}
+		if !yes {
+			return errors.New("nothing was written")
+		}
+	}
+	signal.Stop(signals)
+	close(writing)
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte(made.TOML), 0o644); err != nil {
 		return err
 	}
 	// a config that does not load is taken back, so the next try is not refused for it
 	if _, err := config.Load(name); err != nil {
 		os.Remove(file)
-		return err
+		reason := strings.Replace(err.Error(), file+": ", "", 1)
+		return fmt.Errorf("mingo new made a config that does not load, and took it back: %s", strings.ReplaceAll(reason, file, "it"))
 	}
 	fmt.Fprintf(e.out, "config: %s\n", file)
 	if err := e.setup(name); err != nil {
-		return err
+		return fmt.Errorf("%w\nthe config is kept at %s, finish with mingo setup %s, then mingo apply %s", err, file, name, name)
 	}
-	return e.apply(name)
+	if err := e.apply(name); err != nil {
+		return fmt.Errorf("%w\nthe config is kept at %s, finish with mingo apply %s", err, file, name)
+	}
+	return nil
 }

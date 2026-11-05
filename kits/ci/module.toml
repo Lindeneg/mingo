@@ -2,8 +2,14 @@ does = "the checks of every pull request in .github/workflows/ci.yml, one job pe
 
 [[asks]]
 key = "ci.stack"
-question = "how CI installs the project: pnpm, npm, go or other"
+question = "how CI installs the project"
 default = "pnpm"
+choices = [
+    { value = "pnpm", hint = "installs with pnpm, and each check runs pnpm <check>" },
+    { value = "npm", hint = "installs with npm, and each check runs npm run <check>" },
+    { value = "go", hint = "sets up Go, and you name each check's command" },
+    { value = "other", hint = "you name the setup, each check's command and the audit" },
+]
 
 [[asks]]
 key = "ci.setup"
