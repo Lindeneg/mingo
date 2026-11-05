@@ -142,7 +142,8 @@ Opens a project's config in $EDITOR, or vi without one. The name may be the proj
 Makes what each role needs on this machine, leaving what is there as it is:
   the clone, cloned from the project's repo with gh, then the role's .env from .env.example when
   the project has port offsets, and the new clone marked as trusted in ~/.claude.json
-  the memory folder, with a MEMORY.md that points at handoff-<role>.md
+  the memory folder, with a MEMORY.md that points at handoff-<role>.md, and the pointer put first
+  in a MEMORY.md that lacks it
 
 Cloning needs gh logged in and a git identity.
 `,
@@ -157,7 +158,9 @@ project's sessions and no other's.
 
 Lands the files of the project's modules in its repository through a pull request from the branch
 mingo-kit, or as the first commit of an empty repository, and sets up what the modules need on the
-machine and on GitHub: memory folders, labels, the ruleset, port offsets.
+machine and on GitHub: memory folders, labels, the ruleset on the base branch, and each role's port
+offset in its clone's .env. Everything that can refuse is checked first, so an apply that is refused
+changes nothing.
 
 While the pull request is open, a later apply adds its commit on top, so what was pushed to the
 branch stays. .mingo/kit.lock records each file's module, the mingo version and a hash. A file
@@ -166,6 +169,11 @@ alone, and what mingo renders for it is shown. A file no module renders any more
 it is still as rendered. CLAUDE.md, package.json and .claude/settings.json stay the project's:
 mingo only adds its lines, wraps the heavy scripts, and sets the attribution key. A second apply
 changes nothing.
+
+Until the repository has a package.json, mingo leaves the heavy scripts out, and until a clone has
+an .env or an .env.example, its port offset. On a private repository whose plan has no rulesets,
+which takes GitHub Pro, Team or Enterprise Cloud, it leaves the ruleset out. It says so each time,
+and mingo doctor reports the scripts and the offset as missing and the ruleset as not available.
 
 With claude_files = "local", Claude's files stay out of the repository: CLAUDE.md, made of the text
 mingo claude edit keeps and mingo's lines, the files it imports and .claude go straight into every
@@ -181,7 +189,9 @@ setup comes first.
 Says what of the project's modules is in place and what is missing, with the command that fixes
 each, and the steps only the owner can take, such as the review's token. It reads the base branch,
 so a file waiting in the kit's pull request counts as missing. With claude_files = "local" it reads
-Claude's files in every clone too. It exits 1 while anything is missing.
+Claude's files in every clone too. What it cannot find out, such as the labels while gh is logged
+out, it names with gh's error and counts as neither. It exits 1 while anything is missing or could
+not be checked.
 `,
 	"secret": `mingo secret review <project>
 

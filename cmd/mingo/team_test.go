@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,19 +84,20 @@ func TestGateAndPrOutsideAProjectsCloneSayWhereToRunThem(t *testing.T) {
 	}
 }
 
-func TestApplyOfABareProjectSeedsTheMemoryAndDoctorSaysWhatIsMissing(t *testing.T) {
+func TestApplyOfABareProjectWhoseFoldersAreNoClonesChangesNothingAndDoctorSaysWhatIsMissing(t *testing.T) {
 	h := newHome(t)
 	h.addDemoWith(`modules = ["guards"]`)
 	r := h.mingo("apply", "demo")
-	memory := filepath.Join(h.home, ".claude", "projects", slug(h.home+"/dev/demo/helper"), "memory", "MEMORY.md")
-	if r.code != 1 || !strings.Contains(r.out, "memory: "+memory+"\n") || !strings.HasSuffix(r.out, "run mingo setup demo first\n") {
+	lead := filepath.Join(h.home, "dev", "demo", "lead")
+	if r.code != 1 || !strings.HasPrefix(r.out, "mingo: mingo works on demo through the lead's clone, and lead's folder "+lead+" is no git clone, move it aside and run mingo setup demo\n") {
 		t.Fatal(r.code, r.out)
 	}
-	if h.read(memory) != "- [Handoff](handoff-helper.md): read first, where the work stands and the next step\n" {
-		t.Fatal(h.read(memory))
+	memory := filepath.Join(h.home, ".claude", "projects", slug(h.home+"/dev/demo/helper"), "memory")
+	if _, err := os.Stat(memory); err == nil {
+		t.Fatal("apply made the memory before it refused")
 	}
 	r = h.mingo("doctor", "demo")
-	if r.code != 1 || !strings.Contains(r.out, "    in place: helper's MEMORY.md pointing at handoff-helper.md\n") ||
+	if r.code != 1 || !strings.Contains(r.out, "    missing: helper's MEMORY.md pointing at handoff-helper.md (mingo setup demo)\n") ||
 		!strings.Contains(r.out, "    missing: the write and kill guards in "+filepath.Join(h.home, ".claude", "settings.json")+" (mingo install)\n") {
 		t.Fatal(r.code, r.out)
 	}

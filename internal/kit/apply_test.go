@@ -37,6 +37,7 @@ type world struct {
 	before func(args []string)
 	config string
 	claude string
+	ghErr  string
 }
 
 func newWorld(t *testing.T, empty bool) *world {
@@ -78,6 +79,19 @@ func (w *world) apply() string {
 
 func (w *world) try() error {
 	w.t.Helper()
+	w.prepare()
+	return Apply(w.deps)
+}
+
+func (w *world) doctor() (int, string, error) {
+	w.t.Helper()
+	w.prepare()
+	missing, err := Doctor(w.deps)
+	return missing, w.out.String(), err
+}
+
+func (w *world) prepare() {
+	w.t.Helper()
 	k, err := Load(w.fsys)
 	if err != nil {
 		w.t.Fatal(err)
@@ -97,6 +111,9 @@ func (w *world) try() error {
 		}
 		if name == "gh" {
 			w.gh = append(w.gh, args)
+			if w.ghErr != "" {
+				return team.Result{Code: 1, Stderr: w.ghErr}, nil
+			}
 			if args[1] == "list" {
 				if w.openPR != "" {
 					return team.Result{Stdout: `[{"url":"` + w.openPR + `"}]`}, nil
@@ -109,7 +126,6 @@ func (w *world) try() error {
 	}
 	w.out.Reset()
 	w.deps = Deps{Kit: k, Project: p, Run: run, Out: w.out, TempRoot: w.t.TempDir(), Version: "v1", Home: w.home}
-	return Apply(w.deps)
 }
 
 func (w *world) show(ref, path string) string {
@@ -135,7 +151,7 @@ func TestApplyLandsTheFilesThroughAPullRequestAndASecondApplyChangesNothing(t *t
 		t.Fatal(git(t, w.origin, "log", "-1", "--format=%s", Branch))
 	}
 	create := w.gh[len(w.gh)-1]
-	if strings.Join(create[:6], " ") != "pr create --base master --head mingo-kit" || !strings.Contains(create[len(create)-1], "- adds `TEAM.md` (skills)") {
+	if strings.Join(create[:8], " ") != "pr create -R x/demo --base master --head mingo-kit" || !strings.Contains(create[len(create)-1], "- adds `TEAM.md` (skills)") {
 		t.Fatal(create)
 	}
 	if _, err := os.Stat(filepath.Join(w.deps.Project.MemoryDir("helper"), "MEMORY.md")); err != nil {
@@ -300,5 +316,120 @@ func TestApplySaysWhenTheProjectHasItsOwnFileAtAPath(t *testing.T) {
 	git(t, w.lead, "push", "--quiet", "origin", "master")
 	if out := w.apply(); !strings.Contains(out, "leaves TEAM.md alone, the project has its own, and mingo renders:\n") {
 		t.Fatal(out)
+	}
+}
+
+func TestApplySaysWhatGitSaidWhenAPushFailsForAnotherReasonThanABranchThatMoved(t *testing.T) {
+	w := newWorld(t, false)
+	hook := filepath.Join(w.origin, "hooks", "pre-receive")
+	os.WriteFile(hook, []byte("#!/bin/sh\necho 'permission to x/demo denied' >&2\nexit 1\n"), 0o755)
+	err := w.try()
+	if err == nil || !strings.Contains(err.Error(), `could not push the commit "mingo kit: skills, sessions" to the branch mingo-kit of `+w.origin) ||
+		!strings.Contains(err.Error(), "permission to x/demo denied") || strings.Contains(err.Error(), "moved") {
+		t.Fatal(err)
+	}
+}
+
+func TestApplySaysWhatIsWrongWithTheLeadsCloneAndSendsToSetupOnlyWhenThereIsNone(t *testing.T) {
+	w := newWorld(t, false)
+	git(t, w.lead, "remote", "remove", "origin")
+	if err := w.try(); err == nil || !strings.Contains(err.Error(), "the lead's clone "+w.lead+" has no remote origin, which mingo works through, add it with git remote add origin and the URL of x/demo") {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(w.lead, ".git"))
+	if err := w.try(); err == nil || !strings.Contains(err.Error(), "chief's folder "+w.lead+" is no git clone, move it aside and run mingo setup demo\ngit rev-parse failed:") {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(w.lead)
+	git(t, parent, "init", "--quiet")
+	top, _ := filepath.EvalSymlinks(parent)
+	if err := w.try(); err == nil || !strings.Contains(err.Error(), "chief's folder "+w.lead+" is inside the repository "+top+", not a clone of its own, move it aside and run mingo setup demo") {
+		t.Fatal(err)
+	}
+	if len(w.gh) != 0 {
+		t.Fatal(w.gh)
+	}
+}
+
+func TestApplyNamesTheProjectsRepositoryInEveryPullRequestCallSinceGhPicksAForksParent(t *testing.T) {
+	w := newWorld(t, false)
+	w.apply()
+	w.openPR = "https://github.com/x/demo/pull/7"
+	w.fsys["skills/files/TEAM.md"] = &fstest.MapFile{Data: []byte("{{range .Roles}}* {{.Name}}\n{{end}}")}
+	w.apply()
+	seen := map[string]bool{}
+	for _, call := range w.gh {
+		if call[0] != "pr" {
+			continue
+		}
+		seen[call[1]] = true
+		if call[2] != "-R" || call[3] != "x/demo" {
+			t.Fatal(call)
+		}
+	}
+	if !seen["create"] || !seen["list"] {
+		t.Fatal(w.gh)
+	}
+}
+
+func TestApplyLeavesOutTheHeavyScriptsAndThePortsOfAnEmptyRepositoryAndDoctorReportsThem(t *testing.T) {
+	w := newWorld(t, true)
+	w.fsys["heavy/module.toml"] = &fstest.MapFile{Data: []byte("does = \"heavy\"\n")}
+	w.fsys["ports/module.toml"] = &fstest.MapFile{Data: []byte("does = \"ports\"\nsetup = [\"ports\"]\nchecks = [\"ports\"]\n")}
+	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"heavy\", \"ports\"]\n[heavy]\nscripts = [\"check\", \"test\"]\n[ports]\nvariable = \"APP_PORT_OFFSET\"\n[ports.offsets]\nchief = 10\n[[roles]]\nname = \"chief\"\n"
+	out := w.apply()
+	for _, line := range []string{
+		"ports: leaves out " + filepath.Join(w.lead, ".env") + ", the clone has no .env.example yet, and mingo doctor reports it until it has\n",
+		"leaves out the heavy scripts check, test, the repository has no package.json yet, and mingo doctor reports it until it has\n",
+		"the first commit on master: mingo kit: skills, sessions\n",
+	} {
+		if !strings.Contains(out, line) {
+			t.Fatal(line, out)
+		}
+	}
+	missing, out, err := w.doctor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"    missing: chief's .env with APP_PORT_OFFSET=10 (add .env.example with an empty APP_PORT_OFFSET= line, then mingo apply demo)\n",
+		"    missing: the heavy scripts check, test in package.json, which the repository does not have (add it, then mingo apply demo)\n",
+	} {
+		if !strings.Contains(out, line) {
+			t.Fatal(line, out)
+		}
+	}
+	if missing != 2 {
+		t.Fatal(missing, out)
+	}
+}
+
+func TestDoctorRunsACheckThatTwoModulesShareOnce(t *testing.T) {
+	w := newWorld(t, false)
+	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nchecks = [\"labels\"]\n")}
+	w.fsys["tracker/module.toml"] = &fstest.MapFile{Data: []byte("does = \"tracker\"\nchecks = [\"labels\"]\n")}
+	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"workflow\", \"tracker\"]\n[[roles]]\nname = \"chief\"\n"
+	w.apply()
+	w.merge()
+	missing, out, err := w.doctor()
+	if err != nil || strings.Count(out, "the label ci-unavailable on x/demo") != 1 || missing != 1 {
+		t.Fatal(missing, err, out)
+	}
+}
+
+func TestDoctorSaysWhatItCouldNotCheckAndCountsNoneOfItAsMissing(t *testing.T) {
+	w := newWorld(t, false)
+	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nchecks = [\"labels\"]\n")}
+	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"workflow\"]\n[[roles]]\nname = \"chief\"\n"
+	w.apply()
+	w.merge()
+	w.ghErr = "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login"
+	missing, out, err := w.doctor()
+	want := "    could not check the labels on x/demo: gh label list failed:\n      HTTP 401: Bad credentials (https://api.github.com/graphql)\n      Try authenticating with:  gh auth login\n"
+	if !strings.Contains(out, want) || strings.Contains(out, "missing: the label") || missing != 0 {
+		t.Fatal(missing, out)
+	}
+	if err == nil || err.Error() != "could not check 1 of what the modules need, see above" {
+		t.Fatal(err)
 	}
 }
