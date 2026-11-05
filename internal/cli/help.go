@@ -178,8 +178,14 @@ Stopping the unit stops this project's sessions and no other's.
 Lands the files of the project's modules in its repository through a pull request from the branch
 mingo-kit, or as the first commit of an empty repository, and sets up what the modules need on the
 machine and on GitHub: memory folders, labels, the ruleset on the base branch, and each role's port
-offset in its clone's .env. Everything that can refuse is checked first, so an apply that is refused
-changes nothing.
+offset in its clone's .env.
+
+Before it changes anything it checks the modules and the files they render, the lead's clone with
+its remote origin and base branch, the lock, the files the repository already has, and with
+claude_files = "local" every clone, so a mistake there changes nothing. Then it sets up the memory
+folders, the port offsets, the ruleset and the labels, in that order, pushes, and writes local
+Claude's files into the clones, with the ruleset after the push on an empty repository. A step that
+fails stops apply there, with the steps before it done, and mingo doctor shows what is still missing.
 
 While the pull request is open, a later apply adds its commit on top, so what was pushed to the
 branch stays. .mingo/kit.lock records each file's module, the mingo version and a hash. A file
@@ -277,7 +283,8 @@ Sets up this machine for mingo, and changes nothing when run again:
   writes ~/.tmux.conf when there is none
   adds the guards, deny rules for pkill and killall, and the settings sessions message each other
   with to ~/.claude/settings.json, keeping every other key, and prints each key it changed with its
-  old and new value. A settings.json that is a link is written where the link points.
+  old and new value. A settings.json that is a link is written where the link points. A guard an
+  older mingo wrote with mingo's path unquoted is quoted, since sh splits the path at a space.
 `,
 	"heavy": `mingo heavy <label> -- <command...>
 

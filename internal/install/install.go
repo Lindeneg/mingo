@@ -234,6 +234,14 @@ func mergeSettings(data []byte, home string) ([]byte, []byte, []string, error) {
 		{"Edit|Write|NotebookEdit", bin + " guard write", "Checking the path is inside this project"},
 		{"Bash|PowerShell", bin + " guard bash", "Checking the command ends no process by its name"},
 	}
+	// an older mingo wrote the path unquoted, which sh splits at a space in the home folder, so that
+	// guard fails on every tool call until it is quoted
+	unquoted := map[string]string{}
+	if bin != BinPath(home) {
+		for _, g := range guards {
+			unquoted[BinPath(home)+strings.TrimPrefix(g.command, bin)] = g.command
+		}
+	}
 	hooks := root.Child("hooks")
 	pre, _ := hooks.Get("PreToolUse")
 	entries, _ := pre.([]any)
@@ -256,6 +264,46 @@ func mergeSettings(data []byte, home string) ([]byte, []byte, []string, error) {
 			cmd, _ := hobj.Get("command")
 			s, _ := cmd.(string)
 			has[s] = true
+		}
+	}
+	for i := 0; i < len(entries); i++ {
+		obj, ok := entries[i].(*ojson.Object)
+		if !ok {
+			continue
+		}
+		inner, _ := obj.Get("hooks")
+		list, ok := inner.([]any)
+		if !ok {
+			continue
+		}
+		var kept []any
+		for _, h := range list {
+			s := ""
+			hobj, isObject := h.(*ojson.Object)
+			if isObject {
+				cmd, _ := hobj.Get("command")
+				s, _ = cmd.(string)
+			}
+			quoted, old := unquoted[s]
+			switch {
+			case !old:
+				kept = append(kept, h)
+			case has[quoted]:
+				changes = append(changes, fmt.Sprintf("hooks.PreToolUse lost %q, the same guard as %q", s, quoted))
+			default:
+				hobj.Set("command", quoted)
+				has[quoted] = true
+				kept = append(kept, h)
+				changes = append(changes, fmt.Sprintf("hooks.PreToolUse had %q, now %q", s, quoted))
+			}
+		}
+		switch {
+		case len(kept) == len(list):
+		case len(kept) == 0:
+			entries = append(entries[:i], entries[i+1:]...)
+			i--
+		default:
+			obj.Set("hooks", kept)
 		}
 	}
 	for _, g := range guards {

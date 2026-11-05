@@ -213,6 +213,46 @@ func TestTheGuardHooksRunFromAHomeWithASpaceInIt(t *testing.T) {
 	}
 }
 
+func TestInstallQuotesTheGuardsAnOlderMingoWroteUnquotedUnderAHomeWithASpace(t *testing.T) {
+	h := newHome(t)
+	spaced := filepath.Join(h.root, "my home")
+	h.mkdir(filepath.Join(spaced, ".local", "bin"))
+	bin := filepath.Join(spaced, ".local", "bin", "mingo")
+	file := filepath.Join(spaced, ".claude", "settings.json")
+	h.write(file, strings.ReplaceAll(`{"hooks": {"PreToolUse": [
+  {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "BIN guard write", "timeout": 10}]},
+  {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "BIN guard bash"}, {"type": "command", "command": "'BIN' guard bash"}]},
+  {"matcher": "Bash", "hooks": [{"type": "command", "command": "BIN guard bash"}]}
+]}}`, "BIN", bin))
+	r := h.runIn("", []string{"HOME=" + spaced}, h.bin, "install")
+	want := "  hooks.PreToolUse had \"" + bin + " guard write\", now \"'" + bin + "' guard write\"\n" +
+		"  hooks.PreToolUse lost \"" + bin + " guard bash\", the same guard as \"'" + bin + "' guard bash\"\n" +
+		"  hooks.PreToolUse lost \"" + bin + " guard bash\", the same guard as \"'" + bin + "' guard bash\"\n"
+	if r.code != 0 || !strings.Contains(r.out, want) || strings.Contains(r.out, "gained \"'") {
+		t.Fatal(r.out)
+	}
+	var s struct {
+		Hooks struct {
+			PreToolUse []struct {
+				Hooks []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"PreToolUse"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(h.read(file)), &s); err != nil || len(s.Hooks.PreToolUse) != 2 {
+		t.Fatal(err, h.read(file))
+	}
+	for i, guard := range []string{"write", "bash"} {
+		if hooks := s.Hooks.PreToolUse[i].Hooks; len(hooks) != 1 || hooks[0].Command != "'"+bin+"' guard "+guard {
+			t.Fatal(h.read(file))
+		}
+	}
+	if r := h.runIn("", []string{"HOME=" + spaced}, h.bin, "install"); !strings.Contains(r.out, "claude settings: "+file+" unchanged\n") {
+		t.Fatal(r.out)
+	}
+}
+
 func TestInstallKeepsTheModeOfTheSettingsFile(t *testing.T) {
 	h := newHome(t)
 	file := filepath.Join(h.home, ".claude", "settings.json")
