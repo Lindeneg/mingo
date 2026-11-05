@@ -1,6 +1,6 @@
 [[- if .CI.Stack]][[block "header" .]]# The checks of every pull request, one job per check. mingo pr merge asks each of
 # them to be green on the pull request's head.
-[[end]]name: [[.Workflow.CI]]
+[[end]]name: [[yaml .Workflow.CI]]
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
 [[end]]  workflow_dispatch:
 
 concurrency:
-  group: [[.Workflow.CI]]-${{ github.event.pull_request.number || github.ref }}
+  group: [[yaml (printf "%s-${{ github.event.pull_request.number || github.ref }}" .Workflow.CI)]]
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 [[- else if eq $.CI.Stack "other"]][[if $.CI.Audit]]
       - name: Dependency audit
-        run: [[$.CI.Audit]]
+        run: [[yaml $.CI.Audit]]
 [[- end]]
 [[- else]]
       - name: Dependency audit
@@ -49,6 +49,8 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A repository an organization owns needs gitleaks' free license key as this secret.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
           # The log and the job summary carry the findings; no comment on the pull request.
           GITLEAKS_ENABLE_COMMENTS: "false"
       - name: Semgrep, community rules
@@ -63,6 +65,6 @@ jobs:
 [[- if or (ne $.CI.Stack "other") $.CI.Setup]]
       - uses: ./.github/actions/setup
 [[- end]]
-      - run: [[$.CI.Command $check]]
+      - run: [[yaml ($.CI.Command $check)]]
 [[- end]][[end]]
 [[end]][[end]]

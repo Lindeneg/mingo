@@ -12,7 +12,7 @@
 
 | Role | Clone | Does |
 |---|---|---|
-{{range .Roles}}| {{spaced .Name}} | `{{$.CloneShown .Name}}` | {{.Does}} |
+{{range .Roles}}| {{spaced .Name}} | `{{$.CloneShown .Name}}` | {{cell .Does}} |
 {{end}}
 The rules:
 

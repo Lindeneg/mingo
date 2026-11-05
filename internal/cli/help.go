@@ -120,7 +120,9 @@ A project's config, a TOML file in ~/.config/mingo/projects. MINGO_CONFIG moves 
   show   prints the config
   edit   opens the config in $EDITOR, or vi
 
-mingo new makes a project with its clones and files in one go. README.md names every key.
+mingo new makes a project with its clones and files in one go. README.md names every key. A config
+with a key mingo does not know, or a value it cannot use, is refused with the file, the key and the
+value named.
 `,
 	"project add": `mingo project add <name>
 
@@ -229,7 +231,8 @@ named and nothing pushed.
 	"gate": `mingo gate <log>
 
 Runs the project's [workflow] gate commands in order, without a shell, with their output in the log,
-and stops at the first red one, exiting 1. One line a command says green or red and how long it
+and stops at the first red one, exiting 1. A gate command with &&, a pipe, a redirect or quotes is
+refused when the config loads: such a line goes in a package script or a script file. One line a command says green or red and how long it
 took. A log path that is not absolute starts at the repository's root.
 `,
 	"install": `mingo install

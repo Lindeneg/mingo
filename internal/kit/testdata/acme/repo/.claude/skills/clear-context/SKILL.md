@@ -4,7 +4,7 @@ description: Clear a session's context at an issue boundary, where the worker lo
 ---
 # Clearing a context
 
-Each role runs in a loop (mingo's: `mingo start acme/<role>`): when a session ends, the loop starts a fresh one in the same clone with the opener `You are the <role>. Read your handoff memory, then continue.` So a clear is one session's own work, in one turn: write the handoff, tell the lead, ask to be restarted. Nothing waits for a wake and nobody wakes anybody. Read `TEAM.md`, Working economically 1, for why and when; the steps are here.
+Each role runs in a loop (mingo's: `mingo start acme/<role>`): when a session ends, the loop starts a fresh one in the same clone with the opener `You are the <role> of acme. Read your handoff memory, then continue.` So a clear is one session's own work, in one turn: write the handoff, tell the lead, ask to be restarted. Nothing waits for a wake and nobody wakes anybody. Read `TEAM.md`, Working economically 1, for why and when; the steps are here.
 
 ## Before you clear
 

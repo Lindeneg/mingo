@@ -4,7 +4,8 @@ repo = "acme/shop"
 title = "Acme"
 clone = "~/dev/acme/{role}"
 lead = "lead"
-modules = ["workflow", "ci", "review", "skills", "team", "tracker", "rules", "heavy", "ports"]
+opener = "You are the {role} of {project}. Read your handoff memory, then continue."
+modules =["workflow", "ci", "review", "skills", "team", "tracker", "rules", "heavy", "ports"]
 
 [tracker]
 kind = "linear"

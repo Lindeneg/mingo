@@ -102,6 +102,8 @@ The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply`
 
 The guards catch mistakes, not a session that means to get round them.
 
+On a repository an organization owns, the secret scan of the ci module needs gitleaks' license key, free from [gitleaks.io](https://gitleaks.io), as the repository's secret `GITLEAKS_LICENSE`.
+
 ## A new server
 
 The `provision` folder turns a fresh Ubuntu server into a mingo machine: a user for the sessions, SSH by key only, a firewall, Docker, Node, Go, gh, tmux and Claude Code.
@@ -119,7 +121,7 @@ The server sets itself up on the first boot and reboots. Then SSH in as that use
 ```toml
 id = "sh"                          # a short name that works anywhere the project's name does
 title = "Shop"                     # the project's display name, its name by default
-repo = "you/{project}"
+repo = "you/{project}"             # owner/name on GitHub
 clone = "~/dev/{project}/{role}"   # leave {role} out for a project of one role
 lead = "lead"                      # the first role by default
 opener = "You are the {role}. Read your handoff memory, then continue."
@@ -142,19 +144,19 @@ effort = "high"
 does = "codes the issues labelled dev"
 
 [tracker]
-kind = "linear"                    # linear, github or none, the default
+kind = "linear"                    # linear or github, or none by default, which the tracker module does not take
 team = "ENG"                       # the Closes line then names ENG-n
 project = "Shop"
 
 [workflow]
 base = "master"
 ci = "ci"                          # the workflow whose jobs are the checks
-checks = ["check", "test", "build", "security"]
-gate = ["pnpm check", "pnpm test", "pnpm build"]
+checks = ["check", "test", "build", "security"]   # GitHub job ids, at least one with the ci module
+gate = ["pnpm check", "pnpm test", "pnpm build"]  # run without a shell, so no &&, pipes, redirects or quotes
 tags = ["(lead)", "(dev)"]         # the role tags a description starts with
 reviewer = "claude[bot]"           # whose review comments count, anyone's by default
 local_runs = ["pnpm check", "mingo gate"]
-generate_list = ["pnpm exec tsx tools/generate.ts --list"]
+generate_list = ["pnpm exec tsx tools/generate.ts --list"]   # these two without a shell too
 generate = ["pnpm generate"]
 generated = '^generate: wrote (.+)$'
 # review_line, no_findings, review_heading, footers and trailers tell the review comment and
@@ -167,11 +169,11 @@ pattern = '^src/routes\.ts$'
 merge = "lines"                    # lines, json-keys or none
 
 [ci]
-stack = "pnpm"                     # pnpm, npm, go or other
+stack = "pnpm"                     # pnpm, npm, go or other, which the ci module needs
 # setup = ["make deps"]            # other only: the commands CI runs before each check
 # audit = "make audit"             # other only: the dependency audit of the security job
 [ci.run]
-check = "pnpm check"               # pnpm <check> or npm run <check> by default
+check = "pnpm check"               # a shell line for one of the checks, pnpm <check> or npm run <check> by default
 
 [review]
 read = "CLAUDE.md first"           # README.md first when claude_files is local
@@ -183,7 +185,7 @@ scripts = ["check", "test", "build", "dev"]   # each moves to <script>:run behin
 
 [ports]
 variable = "APP_PORT_OFFSET"       # the empty line in .env.example that gets the offset
-[ports.offsets]
+[ports.offsets]                    # which the ports module needs
 lead = 10
 dev = 20
 
@@ -191,6 +193,8 @@ dev = 20
 checks = '''
 Run `pnpm check` and the tests of each package the change touches.'''
 ```
+
+mingo checks the config each time it reads it, and refuses a key it does not know, a key set to nothing, and a value it cannot use, naming the file, the key and the value. Two projects whose roles would share a tmux session, such as shop's role `dev-api` and shop-dev's role `api`, are refused too.
 
 `MINGO_MODEL_<PROJECT>_<ROLE>` and `MINGO_EFFORT_<PROJECT>_<ROLE>` override a role's model or effort for the sessions a start launches.
 

@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -170,6 +172,11 @@ var funcs = template.FuncMap{
 	"many": func(roles []config.Role) bool {
 		return len(roles) > 1
 	},
+	"yaml":   yamlScalar,
+	"indent": indent,
+	"cell": func(s string) string {
+		return strings.ReplaceAll(strings.Join(strings.Fields(s), " "), "|", `\|`)
+	},
 	"shared": func(files []config.Shared) string {
 		var names []string
 		for _, f := range files {
@@ -184,6 +191,43 @@ var funcs = template.FuncMap{
 	},
 }
 
+// a value as YAML reads it back, left plain where plain reads as the same string, JSON quoted elsewhere
+func yamlScalar(s string) string {
+	if yamlPlain(s) {
+		return s
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.Encode(s)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+var yamlNotString = regexp.MustCompile(`(?i)^(~|null|true|false|yes|no|on|off|y|n|[-+]?\.?[0-9].*|\.(inf|nan))$`)
+
+func yamlPlain(s string) bool {
+	if s == "" || s != strings.TrimSpace(s) || yamlNotString.MatchString(s) {
+		return false
+	}
+	if strings.ContainsAny(s[:1], "-?:,[]{}#&*!|>'\"%@`") {
+		return false
+	}
+	if strings.Contains(s, ": ") || strings.Contains(s, " #") || strings.HasSuffix(s, ":") {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || r == '\u0085' || r == '\u2028' || r == '\u2029' || r == '\ufeff' {
+			return false
+		}
+	}
+	return true
+}
+
+// a value inside a literal block keeps each of its lines at the block's indent
+func indent(n int, s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\n"+strings.Repeat(" ", n))
+}
+
 // workflow files use [[ ]], since GitHub's own expressions are written with braces
 func delims(repoPath string) (string, string) {
 	if strings.HasSuffix(repoPath, ".yml") || strings.HasSuffix(repoPath, ".yaml") {
@@ -195,6 +239,7 @@ func delims(repoPath string) (string, string) {
 // a file whose path or text renders blank is left out, which is how a template says it does not apply
 func (k *Kit) Render(p *config.Project, mods []Module) ([]File, error) {
 	used := map[string]bool{}
+	from := map[string]string{}
 	var out []File
 	for _, m := range mods {
 		for _, name := range m.files {
@@ -210,6 +255,10 @@ func (k *Kit) Render(p *config.Project, mods []Module) ([]File, error) {
 			if repoPath == "" {
 				continue
 			}
+			if first, ok := from[repoPath]; ok {
+				return nil, fmt.Errorf("%s: %s and %s/%s both render %s, so a role is named like one of the kit's files, rename it", p.File, first, m.Name, name, repoPath)
+			}
+			from[repoPath] = m.Name + "/" + name
 			data, err := fs.ReadFile(k.fsys, path.Join(m.Name, "files", name))
 			if err != nil {
 				return nil, err
@@ -227,7 +276,7 @@ func (k *Kit) Render(p *config.Project, mods []Module) ([]File, error) {
 				}
 				text := blocks[block]
 				if strings.TrimSpace(text) == "" {
-					text = `{{""}}`
+					text = left + `""` + right
 				}
 				if _, err := t.New(block).Parse(text); err != nil {
 					return nil, fmt.Errorf("%s, the block %s for %s: %v", p.File, block, repoPath, err)

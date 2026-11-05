@@ -249,7 +249,7 @@ func TestNewTakesBackAConfigThatDoesNotLoad(t *testing.T) {
 	h := newHome(t)
 	file := filepath.Join(h.config, "projects", "demo.toml")
 	r := h.mingo("new", "demo", "--preset", "bare", "--repo", "x/demo", "--roles", "Lead")
-	if r.code == 0 || !strings.Contains(r.out, "has a role named Lead") || strings.Contains(r.out, "config: ") || exists(file) {
+	if r.code == 0 || !strings.Contains(r.out, `has a role named "Lead"`) || strings.Contains(r.out, "config: ") || exists(file) {
 		t.Fatal(r.code, r.out)
 	}
 }

@@ -152,3 +152,135 @@ func TestTheStackOtherRunsItsOwnSetupAndAuditAndHasNoSetupActionWithoutSetup(t *
 		t.Fatal(ci)
 	}
 }
+
+func TestAYAMLValueStaysPlainWhereThatReadsTheSameAndIsJSONQuotedElsewhere(t *testing.T) {
+	for in, want := range map[string]string{
+		"pnpm check":              "pnpm check",
+		"go test ./...":           "go test ./...",
+		"ci":                      "ci",
+		"ci-${{ github.ref }}":    "ci-${{ github.ref }}",
+		"go test -run 'Foo: bar'": `"go test -run 'Foo: bar'"`,
+		"golangci-lint run # all": `"golangci-lint run # all"`,
+		"CI: main":                `"CI: main"`,
+		"*.sh":                    `"*.sh"`,
+		"- run":                   `"- run"`,
+		"'quoted'":                `"'quoted'"`,
+		"make\ntest":              `"make\ntest"`,
+		"true":                    `"true"`,
+		"No":                      `"No"`,
+		"1.5":                     `"1.5"`,
+		"":                        `""`,
+		" lead":                   `" lead"`,
+		"ends:":                   `"ends:"`,
+		`say "hi" > out & <done>`: `say "hi" > out & <done>`,
+		"{a}":                     `"{a}"`,
+		"tab\there":               `"tab\there"`,
+	} {
+		if got := yamlScalar(in); got != want {
+			t.Errorf("%q gives %s, want %s", in, got, want)
+		}
+	}
+	if got := indent(4, "one\ntwo\r\nthree"); got != "one\n    two\n    three" {
+		t.Fatal(got)
+	}
+}
+
+func TestConfigValuesReachTheWorkflowsAsTheStringsTheyAre(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := project(t, `repo = "x/demo"
+title = "Demo\nShop"
+modules = ["ci", "review"]
+[workflow]
+ci = "CI: main"
+checks = ["test", "lint"]
+[ci]
+stack = "other"
+setup = ["*/setup.sh"]
+[ci.run]
+test = "go test -run 'Foo: bar'"
+lint = "golangci-lint run # all"
+[review]
+read = "CLAUDE.md first\nthen docs/"
+[[roles]]
+name = "lead"
+`)
+	mods, _ := k.For(p)
+	files, err := k.Render(p, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := map[string]string{}
+	for _, f := range files {
+		text[f.Path] = f.Text
+	}
+	for path, lines := range map[string][]string{
+		".github/workflows/ci.yml":         {`name: "CI: main"`, `  group: "CI: main-${{ github.event.pull_request.number || github.ref }}"`, `      - run: "go test -run 'Foo: bar'"`, `      - run: "golangci-lint run # all"`},
+		".github/actions/setup/action.yml": {`    - run: "*/setup.sh"`},
+		".github/workflows/review.yml":     {"            You are the pull request review of Demo\n            Shop. Read CLAUDE.md first\n            then docs/. The pull request"},
+	} {
+		for _, line := range lines {
+			if !strings.Contains(text[path], line) {
+				t.Errorf("%s has no %q:\n%s", path, line, text[path])
+			}
+		}
+	}
+}
+
+func TestAnEmptyBlockInAYAMLFileRendersNothing(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := project(t, "repo = \"x/demo\"\nmodules = [\"ci\"]\n[workflow]\nchecks = [\"test\"]\n[ci]\nstack = \"pnpm\"\n[blocks.\".github/workflows/ci.yml\"]\nheader = \"\"\n[[roles]]\nname = \"lead\"\n")
+	mods, _ := k.For(p)
+	files, err := k.Render(p, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci := renderedText(t, files, ".github/workflows/ci.yml"); !strings.HasPrefix(ci, "name: ci\n") {
+		t.Fatal(ci)
+	}
+}
+
+func renderedText(t *testing.T, files []File, path string) string {
+	t.Helper()
+	for _, f := range files {
+		if f.Path == path {
+			return f.Text
+		}
+	}
+	t.Fatalf("%s is not rendered", path)
+	return ""
+}
+
+func TestTwoFilesThatRenderToOnePathAreRefusedNamingBoth(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := project(t, "modules = [\"workflow\"]\nlead = \"task-flow\"\n[[roles]]\nname = \"task-flow\"\n")
+	mods, _ := k.For(p)
+	_, err = k.Render(p, mods)
+	if err == nil || !strings.HasSuffix(err.Error(), ": workflow/.claude/skills/task-flow/SKILL.md and workflow/.claude/skills/{{.Lead}}/SKILL.md both render .claude/skills/task-flow/SKILL.md, so a role is named like one of the kit's files, rename it") {
+		t.Fatal(err)
+	}
+}
+
+func TestARolesDoesStaysInItsCellOfTheTeamTable(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := project(t, "modules = [\"team\"]\n[[roles]]\nname = \"lead\"\ndoes = \"merges | reviews\\nand plans\"\n[[roles]]\nname = \"dev\"\n")
+	mods, _ := k.For(p)
+	files, err := k.Render(p, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team := renderedText(t, files, "TEAM.md"); !strings.Contains(team, "| lead | `~/dev/demo/lead` | merges \\| reviews and plans |\n| dev |") {
+		t.Fatal(team)
+	}
+}
