@@ -88,7 +88,46 @@ func TestRenderRefusesABlockTheFileDoesNotHaveAndBlocksForAFileNotRendered(t *te
 	}
 }
 
+// a load checks a config against the embedded kit, so a config a test kit's own refusal is shown on
+// loads without that check
+func unchecked(t *testing.T) {
+	t.Helper()
+	before := config.RegisterKit(nil)
+	t.Cleanup(func() { config.RegisterKit(before) })
+}
+
+func TestTheKitGivesALoadItsModulesAndTheFoldersOfItsSkills(t *testing.T) {
+	names := config.RegisterKit(nil)
+	config.RegisterKit(names)
+	if names == nil {
+		t.Fatal("the kit gave the config nothing")
+	}
+	k, err := names()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(k.Modules, " ") != "ci guards heavy ports review rules skills team tracker workflow" || strings.Join(k.Always, " ") != "sessions" {
+		t.Fatal(k.Modules, k.Always)
+	}
+	if strings.Join(k.Skills, " ") != "clear-context edge-cases plan-milestone spend sub-agents task-flow" {
+		t.Fatal(k.Skills)
+	}
+	root := t.TempDir()
+	t.Setenv("MINGO_CONFIG", root)
+	os.MkdirAll(filepath.Join(root, "projects"), 0o755)
+	for want, text := range map[string]string{
+		`names the module "workflw", which mingo does not have, it has ci guards heavy ports review rules skills team tracker workflow`: "modules = [\"workflw\"]\n" + demo,
+		"has the lead task-flow, whose skill would take .claude/skills/task-flow":                                                       "[[roles]]\nname = \"task-flow\"\n[[roles]]\nname = \"dev\"\n",
+	} {
+		os.WriteFile(filepath.Join(root, "projects", "demo.toml"), []byte(text), 0o644)
+		if _, err := config.Load("demo"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatal(want, "\n", err)
+		}
+	}
+}
+
 func TestForRefusesAModuleMingoDoesNotHaveOrOneAlwaysOn(t *testing.T) {
+	unchecked(t)
 	k, _ := Load(testKit)
 	for want, modules := range map[string]string{
 		"names the module nope, mingo has base other skills": `["nope"]`,
@@ -257,6 +296,7 @@ func renderedText(t *testing.T, files []File, path string) string {
 }
 
 func TestTwoFilesThatRenderToOnePathAreRefusedNamingBoth(t *testing.T) {
+	unchecked(t)
 	k, err := LoadEmbedded()
 	if err != nil {
 		t.Fatal(err)
@@ -282,5 +322,41 @@ func TestARolesDoesStaysInItsCellOfTheTeamTable(t *testing.T) {
 	}
 	if team := renderedText(t, files, "TEAM.md"); !strings.Contains(team, "| lead | `~/dev/demo/lead` | merges \\| reviews and plans |\n| dev |") {
 		t.Fatal(team)
+	}
+}
+
+// the team and full presets of an earlier mingo new wrote the tracker module with the tracker none
+func TestTheTrackerModuleWithNoTrackerRendersNothingOfItsOwnAndNeedsNothing(t *testing.T) {
+	k, err := LoadEmbedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := project(t, "repo = \"x/demo\"\nmodules = [\"workflow\", \"skills\", \"team\", \"tracker\"]\n[tracker]\nkind = \"none\"\n[[roles]]\nname = \"lead\"\n[[roles]]\nname = \"dev\"\n")
+	mods, err := k.For(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := k.Render(p, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Module == "tracker" {
+			t.Fatal(f.Path)
+		}
+	}
+	tracker, _ := k.Module("tracker")
+	d := Deps{Project: p, Run: (&fakeGitHub{labels: `[{"name":"ci-unavailable"}]`}).run, TempRoot: t.TempDir()}
+	for _, c := range tracker.Checks {
+		r := &report{}
+		checks[c](d, r)
+		for _, f := range r.findings {
+			if !f.ok {
+				t.Fatal(c, f)
+			}
+		}
+	}
+	if labels := wantedLabels(d); len(labels) != 1 || labels[0].name != CIUnavailable {
+		t.Fatal(labels)
 	}
 }

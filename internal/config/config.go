@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -110,6 +111,30 @@ type Project struct {
 	Blocks      map[string]map[string]string `toml:"blocks"`
 }
 
+// what the kit has that a config names, the modules and the folders of the kit's own skills
+type KitNames struct {
+	// the modules a config may name
+	Modules []string
+	// the modules always on, which a config does not name
+	Always []string
+	// the folders the kit's own skills take under .claude/skills, which the lead's skill cannot share
+	Skills []string
+}
+
+var kitNames func() (KitNames, error)
+
+// the kit gives what it has at init, read at the first load that needs it, so a config is checked
+// against it then. a program without the kit, such as this package's tests, loads without these checks.
+// it returns what was given before
+func RegisterKit(names func() (KitNames, error)) func() (KitNames, error) {
+	before := kitNames
+	kitNames = nil
+	if names != nil {
+		kitNames = sync.OnceValues(names)
+	}
+	return before
+}
+
 func Load(name string) (*Project, error) {
 	if !IsName(name) {
 		return nil, fmt.Errorf("a project name is lowercase letters, digits and hyphens, not %s", name)
@@ -168,6 +193,9 @@ func Load(name string) (*Project, error) {
 		p.Lead = p.Roles[0].Name
 	}
 	if err := p.checkRoles(); err != nil {
+		return nil, err
+	}
+	if err := p.checkKit(); err != nil {
 		return nil, err
 	}
 	if err := p.workflowDefaults(md); err != nil {

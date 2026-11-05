@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -227,11 +228,17 @@ func (p *Project) checkRepo() error {
 // a GitHub Actions job id
 var jobRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
+// mingo pr merge matches each check against the names GitHub reports, which are a job's name and
+// its matrix values, so only the ci module, which makes a job of each check, needs job ids
 func (p *Project) checkChecks() error {
+	ci := slices.Contains(p.Modules, "ci")
 	seen := map[string]bool{}
 	for _, check := range p.Workflow.Checks {
-		if !jobRe.MatchString(check) {
-			return fmt.Errorf("%s has the check %q in [workflow] checks, which GitHub cannot take as a job, use letters, digits, - and _, starting with a letter or _", p.File, check)
+		switch {
+		case ci && !jobRe.MatchString(check):
+			return fmt.Errorf("%s has the check %q in [workflow] checks, which GitHub cannot take as a job id, and the ci module makes a job of each check, use letters, digits, - and _, starting with a letter or _", p.File, check)
+		case strings.TrimSpace(check) == "":
+			return fmt.Errorf("%s has an empty check %q in [workflow] checks, take it out", p.File, check)
 		}
 		if seen[check] {
 			return fmt.Errorf("%s has the check %s twice in [workflow] checks", p.File, check)
@@ -268,8 +275,30 @@ func (p *Project) checkModules() error {
 		return fmt.Errorf("%s has the ci module and no [workflow] checks, name the jobs every pull request must pass", p.File)
 	case on("ports") && len(p.Ports.Offsets) == 0:
 		return fmt.Errorf("%s has the ports module without [ports.offsets], give each role its port offset", p.File)
-	case on("tracker") && p.Tracker.Kind == "none":
-		return fmt.Errorf("%s has the tracker module with no tracker, set [tracker] kind to linear or github", p.File)
+	}
+	return nil
+}
+
+// the modules a config names and the lead's name, against what the kit has, when it gave it
+func (p *Project) checkKit() error {
+	if kitNames == nil {
+		return nil
+	}
+	k, err := kitNames()
+	if err != nil {
+		return err
+	}
+	for _, m := range p.Modules {
+		switch {
+		case slices.Contains(k.Always, m):
+			return fmt.Errorf("%s names the module %s, which is always on, take it out of modules", p.File, m)
+		case !slices.Contains(k.Modules, m):
+			return fmt.Errorf("%s names the module %q, which mingo does not have, it has %s", p.File, m, strings.Join(k.Modules, " "))
+		}
+	}
+	// the lead's skill is .claude/skills/<lead>, which would be one of the kit's own skills
+	if slices.Contains(k.Skills, p.Lead) {
+		return fmt.Errorf("%s has the lead %s, whose skill would take .claude/skills/%s, the folder of the kit's own %s skill, make another role the lead or rename this one", p.File, p.Lead, p.Lead, p.Lead)
 	}
 	return nil
 }

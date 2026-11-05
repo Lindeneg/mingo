@@ -75,15 +75,32 @@ func TestACommandInCIRunIsForOneOfTheChecks(t *testing.T) {
 
 func TestChecksAreUniqueGitHubJobIDsAndTheCIModuleNeedsOne(t *testing.T) {
 	setupHome(t)
+	ci := func(checks string) []string {
+		return []string{`modules = ["ci"]`, `[ci]`, `stack = "pnpm"`, `[workflow]`, `checks = ` + checks}
+	}
 	refused(t, map[string][]string{
-		`has the check "type check" in [workflow] checks, which GitHub cannot take as a job`: {`[workflow]`, `checks = ["type check"]`},
-		`has the check "1test" in [workflow] checks`:                                         {`[workflow]`, `checks = ["1test"]`},
-		`has the check "" in [workflow] checks`:                                              {`[workflow]`, `checks = [""]`},
-		"has the check test twice in [workflow] checks":                                      {`[workflow]`, `checks = ["test", "test"]`},
-		"has the ci module and no [workflow] checks":                                         {`modules = ["ci"]`, `[ci]`, `stack = "pnpm"`},
+		`has the check "type check" in [workflow] checks, which GitHub cannot take as a job id`: ci(`["type check"]`),
+		`has the check "1test" in [workflow] checks, which GitHub cannot take as a job id`:      ci(`["1test"]`),
+		`has an empty check "" in [workflow] checks, take it out`:                               {`[workflow]`, `checks = [""]`},
+		`has an empty check " " in [workflow] checks, take it out`:                              {`[workflow]`, `checks = [" "]`},
+		"has the check test twice in [workflow] checks":                                         {`[workflow]`, `checks = ["test", "test"]`},
+		"has the check Unit tests twice in [workflow] checks":                                   {`[workflow]`, `checks = ["Unit tests", "Unit tests"]`},
+		"has the ci module and no [workflow] checks":                                            {`modules = ["ci"]`, `[ci]`, `stack = "pnpm"`},
 	})
-	addProject(t, "right", `[workflow]`, `checks = ["type-check", "_lint", "Test2"]`, `[[roles]]`, `name = "lead"`)
+	addProject(t, "wrong", append(ci(`["type check"]`), `[[roles]]`, `name = "lead"`)...)
+	if _, err := Load("wrong"); err == nil || !strings.HasSuffix(err.Error(), `, and the ci module makes a job of each check, use letters, digits, - and _, starting with a letter or _`) {
+		t.Fatal(err)
+	}
+	addProject(t, "right", append(ci(`["type-check", "_lint", "Test2"]`), `[[roles]]`, `name = "lead"`)...)
 	mustLoad(t, "right")
+}
+
+func TestWithoutTheCIModuleACheckIsAnyNameGitHubShowsForAJob(t *testing.T) {
+	setupHome(t)
+	addProject(t, "right", `[workflow]`, `checks = ["Unit tests", "build (ubuntu-latest)", "1test"]`, `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "right"); strings.Join(p.Workflow.Checks, ",") != "Unit tests,build (ubuntu-latest),1test" {
+		t.Fatal(p.Workflow.Checks)
+	}
 }
 
 func TestTheRepoIsOwnerAndNameAsGitHubHasThem(t *testing.T) {
@@ -127,10 +144,43 @@ func TestAKeySetToNothingIsRefused(t *testing.T) {
 func TestAModuleWithoutTheKeyItNeedsIsRefused(t *testing.T) {
 	setupHome(t)
 	refused(t, map[string][]string{
-		"has the ci module without [ci] stack, use pnpm, npm, go or other":               {`modules = ["ci"]`, `[workflow]`, `checks = ["test"]`},
-		"has the ports module without [ports.offsets], give each role its port offset":   {`modules = ["ports"]`, `[ports]`, `variable = "PORT_OFFSET"`},
-		"has the tracker module with no tracker, set [tracker] kind to linear or github": {`modules = ["tracker"]`},
+		"has the ci module without [ci] stack, use pnpm, npm, go or other":             {`modules = ["ci"]`, `[workflow]`, `checks = ["test"]`},
+		"has the ports module without [ports.offsets], give each role its port offset": {`modules = ["ports"]`, `[ports]`, `variable = "PORT_OFFSET"`},
 	})
+}
+
+func TestAModuleTheKitLacksOrHasAlwaysOnAndALeadNamedLikeOneOfItsSkillsAreRefused(t *testing.T) {
+	setupHome(t)
+	addProject(t, "loose", `modules = ["workflw"]`, `[[roles]]`, `name = "task-flow"`)
+	mustLoad(t, "loose")
+	before := RegisterKit(func() (KitNames, error) {
+		return KitNames{Modules: []string{"ci", "workflow"}, Always: []string{"sessions"}, Skills: []string{"spend", "task-flow"}}, nil
+	})
+	t.Cleanup(func() { RegisterKit(before) })
+	refused(t, map[string][]string{
+		`names the module "workflw", which mingo does not have, it has ci workflow`: {`modules = ["workflw"]`},
+		`names the module "", which mingo does not have`:                            {`modules = ["ci", ""]`, `[ci]`, `stack = "pnpm"`, `[workflow]`, `checks = ["test"]`},
+		"names the module sessions, which is always on, take it out of modules":     {`modules = ["sessions"]`},
+	})
+	for _, lead := range [][]string{{`lead = "spend"`}, {}} {
+		addProject(t, "wrong", append(lead, `[[roles]]`, `name = "spend"`, `[[roles]]`, `name = "dev"`)...)
+		if _, err := Load("wrong"); err == nil || !strings.HasSuffix(err.Error(), "has the lead spend, whose skill would take .claude/skills/spend, the folder of the kit's own spend skill, make another role the lead or rename this one") {
+			t.Fatal(err)
+		}
+	}
+	addProject(t, "right", `lead = "dev"`, `modules = ["workflow"]`, `[[roles]]`, `name = "spend"`, `[[roles]]`, `name = "dev"`)
+	mustLoad(t, "right")
+}
+
+// the team and full presets of an earlier mingo new wrote the tracker module with the tracker none
+func TestTheTrackerModuleWithNoTrackerLoads(t *testing.T) {
+	setupHome(t)
+	for _, tracker := range [][]string{{`[tracker]`, `kind = "none"`}, nil} {
+		addProject(t, "team", append(append([]string{`modules = ["workflow", "team", "tracker"]`}, tracker...), `[[roles]]`, `name = "lead"`)...)
+		if p := mustLoad(t, "team"); p.Tracker.Kind != "none" {
+			t.Fatal(p.Tracker)
+		}
+	}
 }
 
 func TestGateAndGenerateCommandsMayNotUseTheShell(t *testing.T) {

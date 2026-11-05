@@ -146,14 +146,14 @@ effort = "high"
 does = "codes the issues labelled dev"
 
 [tracker]
-kind = "linear"                    # linear or github, or none by default, which the tracker module does not take
+kind = "linear"                    # linear, github or none, none by default, with which the tracker module does nothing
 team = "ENG"                       # the Closes line then names ENG-n
 project = "Shop"
 
 [workflow]
 base = "master"
 ci = "ci"                          # the workflow whose jobs are the checks
-checks = ["check", "test", "build", "security"]   # GitHub job ids, at least one with the ci module
+checks = ["check", "test", "build", "security"]   # the checks by the names GitHub shows on a pull request, job ids with the ci module, which needs one
 gate = ["pnpm check", "pnpm test", "pnpm build"]  # run without a shell, so no &&, pipes, redirects or quotes
 tags = ["(lead)", "(dev)"]         # the role tags a description starts with
 reviewer = "claude[bot]"           # whose review comments count, anyone's by default

@@ -94,6 +94,47 @@ func (k *Kit) Names() []string {
 	return names
 }
 
+// the folders the kit's own skills take under .claude/skills, read from the paths that are no template
+func (k *Kit) skillFolders() []string {
+	var folders []string
+	for _, m := range k.Modules {
+		for _, name := range m.files {
+			rest, ok := strings.CutPrefix(name, ".claude/skills/")
+			folder, _, _ := strings.Cut(rest, "/")
+			if ok && folder != "" && !strings.Contains(folder, "{{") && !contains(folders, folder) {
+				folders = append(folders, folder)
+			}
+		}
+	}
+	sort.Strings(folders)
+	return folders
+}
+
+func (k *Kit) names() config.KitNames {
+	var names config.KitNames
+	for _, m := range k.Modules {
+		if m.Always {
+			names.Always = append(names.Always, m.Name)
+		} else {
+			names.Modules = append(names.Modules, m.Name)
+		}
+	}
+	names.Skills = k.skillFolders()
+	return names
+}
+
+// a load refuses a module the kit does not have and a lead named like one of its skills, which only
+// the kit knows
+func init() {
+	config.RegisterKit(func() (config.KitNames, error) {
+		k, err := LoadEmbedded()
+		if err != nil {
+			return config.KitNames{}, err
+		}
+		return k.names(), nil
+	})
+}
+
 // the modules a project uses, those always on first, then the ones it names in kit order
 func (k *Kit) For(p *config.Project) ([]Module, error) {
 	for _, name := range p.Modules {
