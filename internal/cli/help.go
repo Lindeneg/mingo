@@ -63,7 +63,8 @@ this start launches.
 Asks each session to exit, waits up to 90 seconds for them all, then closes the tmux session of any
 still there. A project stops every role. With no target, the default project. Every target is
 checked before any session is asked. MINGO_STOP_WAIT changes the wait, in seconds.
-` + targets + asWritten,
+` + targets + asWritten + `A project whose config does not load stops each role that has run a session on this machine.
+`,
 	"restart": `mingo restart [--force] <target>
 
 Ends a role's session where it stands: the loop types /exit within seconds and starts a fresh

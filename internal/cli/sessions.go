@@ -135,7 +135,8 @@ func pick(specs []string, onlyAutostart bool, parse func(string) (*config.Projec
 
 // the project and role a command that controls a running loop acts on, with no role named the lead
 // when lead is set and the whole project when not. a loop runs on the config it loaded, so while
-// the config does not load a target written as project/role still reaches the session by its names
+// the config does not load a target written as project/role still reaches the session by its names,
+// and a whole project reaches the roles that have run a session here
 func (e *env) loopTarget(spec string, lead bool) (*config.Project, string, error) {
 	name, part, written := strings.Cut(spec, "/")
 	if !written {
@@ -155,6 +156,17 @@ func (e *env) loopTarget(spec string, lead bool) (*config.Project, string, error
 		if !ok {
 			return nil, "", err
 		}
+		if !written && part == "" && !lead {
+			p := &config.Project{Name: found}
+			if p.Roles = rolesRun(p); len(p.Roles) > 0 {
+				sessions := make([]string, len(p.Roles))
+				for i, r := range p.Roles {
+					sessions[i] = p.SessionName(r.Name)
+				}
+				fmt.Fprintf(e.err, "mingo: %s's config does not load, so the command goes to the tmux sessions of the roles that have run, %s: %v\n", found, strings.Join(sessions, ", "), err)
+				return p, "", nil
+			}
+		}
 		if !written || !config.IsName(part) {
 			return nil, "", fmt.Errorf("%s's config does not load, so write the target as %s/<role>: %v", found, found, err)
 		}
@@ -173,6 +185,19 @@ func (e *env) loopTarget(spec string, lead bool) (*config.Project, string, error
 		return p, p.Lead, nil
 	}
 	return p, "", nil
+}
+
+// a loop writes its role's using file at every session and leaves it there, so the state folder
+// names the roles that have run without the config
+func rolesRun(p *config.Project) []config.Role {
+	entries, _ := os.ReadDir(p.State())
+	var roles []config.Role
+	for _, entry := range entries {
+		if name, ok := strings.CutSuffix(entry.Name(), ".using"); ok && config.IsName(name) {
+			roles = append(roles, config.Role{Name: name})
+		}
+	}
+	return roles
 }
 
 func claudeCommand() string {
@@ -477,7 +502,7 @@ type agentRow struct {
 }
 
 func liveAgents() []agentRow {
-	out, err := exec.Command("claude", "agents", "--json").Output()
+	out, err := exec.Command(claudeCommand(), "agents", "--json").Output()
 	if err != nil {
 		return nil
 	}

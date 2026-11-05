@@ -198,7 +198,7 @@ checks = '''
 Run `pnpm check` and the tests of each package the change touches.'''
 ```
 
-mingo checks the config each time it reads it, and refuses a key it does not know, a key set to nothing, and a value it cannot use, naming the file, the key and the value. Two projects whose roles would share a tmux session, such as shop's role `dev-api` and shop-dev's role `api`, are refused too. While a config does not load, its running loops go on with the config they loaded, and `stop`, `restart`, `attach`, `ro`, `peek` and `say` still reach a session written as `<project>/<role>`.
+mingo checks the config each time it reads it, and refuses a key it does not know, a key set to nothing, and a value it cannot use, naming the file, the key and the value. Two projects whose roles would share a tmux session, such as shop's role `dev-api` and shop-dev's role `api`, are refused too. While a config does not load, its running loops go on with the config they loaded, and `stop`, `restart`, `attach`, `ro`, `peek` and `say` still reach a session written as `<project>/<role>`. `stop <project>` then stops each role that has run a session on this machine.
 
 `MINGO_MODEL_<PROJECT>_<ROLE>` and `MINGO_EFFORT_<PROJECT>_<ROLE>` override a role's model or effort for the sessions a start launches.
 

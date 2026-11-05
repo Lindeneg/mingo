@@ -347,7 +347,7 @@ func TestATargetWithoutItsRoleIsRefusedWhileTheConfigDoesNotLoad(t *testing.T) {
 	h.startLoop("obeys")
 	problem := h.breakDemo()
 	want := "mingo: demo's config does not load, so write the target as demo/<role>: " + problem + "\n"
-	for _, words := range [][]string{{"stop", "demo"}, {"attach", "demo"}, {"say", "demo", "hello"}} {
+	for _, words := range [][]string{{"attach", "demo"}, {"say", "demo", "hello"}} {
 		if r := h.mingo(words...); r.code != 1 || r.out != want {
 			t.Fatal(words, r.code, r.out)
 		}
@@ -360,6 +360,22 @@ func TestATargetWithoutItsRoleIsRefusedWhileTheConfigDoesNotLoad(t *testing.T) {
 	}
 }
 
+func TestStopOfAProjectWhoseConfigDoesNotLoadStopsEachRoleThatHasRunASession(t *testing.T) {
+	h := newHome(t)
+	h.addDemo()
+	problem := h.breakDemo()
+	if r := h.mingo("stop", "demo"); r.code != 1 || r.out != "mingo: demo's config does not load, so write the target as demo/<role>: "+problem+"\n" {
+		t.Fatal(r.code, r.out)
+	}
+	h.startLoop("obeys")
+	h.breakDemo()
+	want := "mingo: demo's config does not load, so the command goes to the tmux sessions of the roles that have run, demo-lead: " + problem + "\n" +
+		"demo-lead: stopped\n"
+	if r := h.mingo("stop", "demo"); r.code != 0 || r.out != want {
+		t.Fatal(r.code, r.out)
+	}
+}
+
 func TestClearInsideASessionNeedsNoConfigThatLoads(t *testing.T) {
 	h := newHome(t)
 	h.startLoop("obeys")
@@ -369,6 +385,20 @@ func TestClearInsideASessionNeedsNoConfigThatLoads(t *testing.T) {
 		t.Fatal(r.code, r.out)
 	}
 	h.mustWait(20, "the second start", h.startsAre(2))
+}
+
+func TestAgentsAsksTheClaudeThatMingoClaudeNames(t *testing.T) {
+	h := newHome(t)
+	h.startLoop("obeys")
+	claude := filepath.Join(h.root, "elsewhere", "claude")
+	h.write(claude, "#!/usr/bin/env bash\n"+`echo '[{"name":"demo-lead","pid":1,"status":"busy","startedAt":0}]'`+"\n")
+	if err := os.Chmod(claude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := h.runIn("", []string{"MINGO_CLAUDE=" + claude}, h.bin, "agents", "demo")
+	if lines := r.lines(); r.code != 0 || len(lines) != 3 || !regexp.MustCompile(`^demo +lead +busy `).MatchString(lines[1]) {
+		t.Fatal(r.code, r.out)
+	}
 }
 
 func TestStatusAsksTheClaudeThatMingoClaudeNames(t *testing.T) {
