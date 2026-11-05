@@ -204,13 +204,20 @@ func TestStatusSaysWhatRunsAndWhatAStartWouldUse(t *testing.T) {
 func TestSayTypesIntoARunningSessionAndIsRefusedBetweenSessions(t *testing.T) {
 	h := newHome(t)
 	h.startLoop("listens")
-	if r := h.mingo("say", "demo/l", "hello", "there"); r.code != 0 {
+	if r := h.mingo("say", "demo/l", "hello", "-h", "there"); r.code != 0 {
 		t.Fatal(r.out)
 	}
-	h.mustWait(10, "the typed text", func() bool { return h.typed() == "hello there" })
+	h.mustWait(10, "the typed text", func() bool { return h.typed() == "hello -h there" })
 	removeFile(h.marker("running"))
 	r := h.mingo("say", "demo/l", "again")
 	if r.code == 0 || !strings.Contains(r.out, "between sessions") {
+		t.Fatal(r.out)
+	}
+}
+
+func TestSayShowsItsHelpOnlyForAHelpWordBeforeTheMessage(t *testing.T) {
+	h := newHome(t)
+	if r := h.mingo("say", "-h"); r.code != 0 || !strings.HasPrefix(r.out, "mingo say ") {
 		t.Fatal(r.out)
 	}
 }

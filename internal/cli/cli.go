@@ -229,7 +229,12 @@ func (e *env) dispatch(args []string) error {
 	if !known(command) {
 		return badUsage(fmt.Sprintf("unknown command %q, mingo help lists them", command))
 	}
-	if wantsHelp(args) {
+	asked := args
+	// the words of a message are the message, so only the target can ask for help
+	if command == "say" && len(asked) > 1 {
+		asked = asked[:1]
+	}
+	if wantsHelp(asked) {
 		words := []string{command}
 		if withSubcommands[command] && !isHelp(args[0]) {
 			words = append(words, args[0])
