@@ -38,6 +38,16 @@ type Prompter struct {
 	rows    int
 	at      int
 	asking  bool
+
+	// the read of a key that a check left waiting, and the keys typed while a check ran, both taken
+	// before the terminal is read again
+	reading chan keyRead
+	typed   []key
+}
+
+type keyRead struct {
+	k   key
+	err error
 }
 
 func NewPrompter(in, out *os.File) *Prompter {
@@ -237,6 +247,56 @@ type key struct {
 	r    rune
 }
 
+// the next key, from what a check left before the terminal
+func (p *Prompter) nextKey() (key, error) {
+	if len(p.typed) > 0 {
+		k := p.typed[0]
+		p.typed = p.typed[1:]
+		return k, nil
+	}
+	if p.reading != nil {
+		r := <-p.reading
+		p.reading = nil
+		return r.k, r.err
+	}
+	return p.readKey()
+}
+
+// runs check while the keys are still read, since with the terminal taking keys one at a time ctrl c
+// sends no signal, and a check may wait on gh for a minute. it says whether ctrl c stopped it, else
+// returns the check's error, with the other keys typed meanwhile kept for after it
+func (p *Prompter) watch(check func(string) error, v string) (bool, error) {
+	done := make(chan error, 1)
+	go func() { done <- check(v) }()
+	for {
+		if p.reading == nil {
+			reading := make(chan keyRead, 1)
+			go func() {
+				k, err := p.readKey()
+				reading <- keyRead{k, err}
+			}()
+			p.reading = reading
+		}
+		select {
+		case err := <-done:
+			return false, err
+		case r := <-p.reading:
+			p.reading = nil
+			switch {
+			case r.err != nil:
+				// the end of the input waits for the check, and the next read meets it
+				back := make(chan keyRead, 1)
+				back <- r
+				p.reading = back
+				return false, <-done
+			case r.k.kind == keyStop:
+				return true, nil
+			}
+			p.typed = append(p.typed, r.k)
+		}
+	}
+}
+
 func (p *Prompter) readKey() (key, error) {
 	r, _, err := p.in.ReadRune()
 	if err != nil {
@@ -385,7 +445,7 @@ func (p *Prompter) Text(question, def, input, problem string, check func(string)
 			lines = append(lines, "  "+p.style(yellow, problem))
 		}
 		p.draw(lines, 0, visible(head)+e.at)
-		k, err := p.readKey()
+		k, err := p.nextKey()
 		if err != nil || k.kind == keyStop {
 			return "", p.stop(question, err)
 		}
@@ -400,7 +460,11 @@ func (p *Prompter) Text(question, def, input, problem string, check func(string)
 			v = def
 		}
 		if check != nil {
-			if err := check(v); err != nil {
+			stopped, err := p.watch(check, v)
+			if stopped {
+				return "", p.stop(question, nil)
+			}
+			if err != nil {
 				if isFinal(err) {
 					return "", p.stop(question, err)
 				}
@@ -491,7 +555,7 @@ func (p *Prompter) Choose(question string, values, hints []string, def, problem 
 			}
 		}
 		p.draw(lines, -1, 0)
-		k, err := p.readKey()
+		k, err := p.nextKey()
 		switch {
 		case err != nil || k.kind == keyStop:
 			return "", p.stop(question, err)
@@ -563,7 +627,7 @@ func (p *Prompter) Confirm(question string) (bool, error) {
 	for {
 		head := p.asked(question) + " " + p.style(dim, "(Y/n)") + " "
 		p.draw([]string{head}, 0, visible(head))
-		k, err := p.readKey()
+		k, err := p.nextKey()
 		switch {
 		case err != nil || k.kind == keyStop:
 			return false, p.stop(question, err)

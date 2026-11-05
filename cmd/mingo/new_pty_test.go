@@ -229,6 +229,35 @@ func TestCtrlCAtATerminalPutsItBackAndWritesNothing(t *testing.T) {
 	}
 }
 
+func TestCtrlCWhileGhChecksAnAnswerStopsAtOnceAndWritesNothing(t *testing.T) {
+	h := newHome(t)
+	started := filepath.Join(h.root, "gh-started")
+	h.fakeTool("gh", `case "$1 $2" in
+  "repo view") echo $$ >`+shellQuote(started)+`; sleep 30; exit 0 ;;
+  *) exit 1 ;;
+esac
+`)
+	// the slow gh leads a process group of its own, which mingo leaves to end by itself
+	t.Cleanup(func() {
+		if pid, err := strconv.Atoi(strings.TrimSpace(h.read(started))); err == nil && pid > 1 {
+			syscall.Kill(-pid, syscall.SIGKILL)
+		}
+	})
+	file := filepath.Join(h.config, "projects", "demo.toml")
+	term := h.onTerminal(nil, "new", "demo", "--preset", "bare")
+	term.expect("? the GitHub repository, as owner/name: ")
+	term.send("x/slow\r")
+	if !waitFor(15, func() bool { return strings.TrimSpace(h.read(started)) != "" }) {
+		t.Fatal("gh did not start")
+	}
+	at := time.Now()
+	term.send("\x03")
+	term.expect("mingo: stopped, nothing was written")
+	if code := term.exit(); code != 130 || exists(file) || !term.cooked() || time.Since(at) > 5*time.Second {
+		t.Fatal(code, exists(file), term.cooked(), time.Since(at))
+	}
+}
+
 func TestNewAtATerminalGoesOnWhenToldAndMakesTheProject(t *testing.T) {
 	h := newHome(t)
 	h.write(filepath.Join(h.home, ".gitconfig"), "[user]\n\tname = Kit Test\n\temail = kit@example.test\n[commit]\n\tgpgsign = false\n")

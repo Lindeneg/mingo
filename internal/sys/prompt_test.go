@@ -3,6 +3,7 @@ package sys
 import (
 	"bufio"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -145,6 +146,57 @@ func TestCtrlCStopsAnyQuestionAndPutsTheTerminalBack(t *testing.T) {
 	p, _, _ := typed("", false, true)
 	if _, err := p.Text("the repository", "", "", "", nil); !errors.Is(err, ErrStopped) {
 		t.Fatal(err)
+	}
+}
+
+// a prompter reading keys as the test types them, while a check waits until it is let go
+func typing() (*Prompter, *io.PipeWriter, *rawState) {
+	r, w := io.Pipe()
+	p, _, state := typed("", false, false)
+	p.in = bufio.NewReader(r)
+	return p, w, state
+}
+
+func TestCtrlCWhileACheckWaitsStopsTheQuestionAtOnce(t *testing.T) {
+	p, w, state := typing()
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	check := func(string) error {
+		close(started)
+		<-release
+		return nil
+	}
+	go func() {
+		w.Write([]byte("x/slow\r"))
+		<-started
+		w.Write([]byte("\x03"))
+	}()
+	if _, err := p.Text("the repository", "", "", "", check); !errors.Is(err, ErrStopped) || state.raw != 1 || state.restored != 1 {
+		t.Fatal(err, state)
+	}
+}
+
+func TestKeysTypedWhileACheckWaitsAreKeptForAfterIt(t *testing.T) {
+	p, w, _ := typing()
+	started, release := make(chan struct{}, 2), make(chan struct{})
+	var checked []string
+	check := func(v string) error {
+		checked = append(checked, v)
+		started <- struct{}{}
+		if v == "ab" {
+			<-release
+			return errors.New("not yet")
+		}
+		return nil
+	}
+	go func() {
+		w.Write([]byte("ab\r"))
+		<-started
+		w.Write([]byte("c\r"))
+		close(release)
+	}()
+	if v, err := p.Text("the repository", "", "", "", check); err != nil || v != "abc" || strings.Join(checked, ",") != "ab,abc" {
+		t.Fatal(v, err, checked)
 	}
 }
 
