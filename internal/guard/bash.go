@@ -36,6 +36,7 @@ type segment struct {
 	argTokens    []token
 	text         string
 	unquotedText string
+	shell        dialect
 }
 
 func wordSet(words ...string) map[string]bool {
@@ -303,6 +304,7 @@ func parse(source string, d dialect) []statement {
 	var tokens []token
 	var buffer []rune
 	var quote rune
+	var lastRedirect rune
 	quoted := false
 	start := 0
 
@@ -335,6 +337,8 @@ func parse(source string, d dialect) []statement {
 		if hasNext {
 			next = src[i+1]
 		}
+		afterRedirect := lastRedirect
+		lastRedirect = 0
 		if quote != 0 {
 			if ch == escape && quote == '"' && hasNext && (ps || strings.ContainsRune("$`\"\\\n", next)) {
 				buffer = append(buffer, next)
@@ -355,6 +359,24 @@ func parse(source string, d dialect) []statement {
 				buffer = append(buffer, next)
 			}
 			i++
+		case !ps && ch == '#' && len(buffer) == 0 && !quoted && (i == 0 || strings.ContainsRune(" \t\n;&|", src[i-1])):
+			// a comment runs to the end of its line and starts only where bash starts a word
+			endStatement(i)
+			for i+1 < len(src) && src[i+1] != '\n' {
+				i++
+			}
+			start = i + 1
+		case !ps && ((ch == '&' && afterRedirect != 0) || (ch == '|' && afterRedirect == '>')):
+			// the & of 2>&1 and <&3 and the | of >| belong to the redirect
+			buffer = append(buffer, ch)
+		case !ps && ch == '&' && next == '>':
+			// &> sends both streams to a file and starts a word of its own
+			endToken()
+			buffer = append(buffer, ch)
+		case !ps && ch == '|' && next == '&':
+			// |& pipes both streams
+			endSegment()
+			i++
 		case (ch == '|' || ch == '&') && hasNext && next == ch:
 			endStatement(i)
 			i++
@@ -367,6 +389,9 @@ func parse(source string, d dialect) []statement {
 		case isJSSpace(ch):
 			endToken()
 		default:
+			if ch == '>' || ch == '<' {
+				lastRedirect = ch
+			}
 			buffer = append(buffer, ch)
 		}
 	}
@@ -513,6 +538,9 @@ func inspect(tokens []token, d dialect) (segment, bool) {
 			continue
 		}
 		if _, ok := wrapperValueFlags[name]; ok {
+			if name == "command" && d == bashDialect && describesOnly(tokens[i+1:]) {
+				break
+			}
 			i = skipWrapperFlags(tokens, i+1, name, d)
 			continue
 		}
@@ -521,7 +549,7 @@ func inspect(tokens []token, d dialect) (segment, bool) {
 	if i >= len(tokens) {
 		return segment{}, false
 	}
-	s := segment{cmd: basename(tokens[i].text), argTokens: tokens[i+1:]}
+	s := segment{cmd: basename(tokens[i].text), argTokens: tokens[i+1:], shell: d}
 	var all, unquoted []string
 	for _, t := range tokens {
 		all = append(all, t.text)
@@ -535,6 +563,19 @@ func inspect(tokens []token, d dialect) (segment, bool) {
 	s.text = strings.Join(all, " ")
 	s.unquotedText = strings.Join(unquoted, " ")
 	return s, true
+}
+
+// command -v and -V say what a name is and run nothing
+func describesOnly(tokens []token) bool {
+	for _, t := range tokens {
+		if t.quoted || !strings.HasPrefix(t.text, "-") || t.text == "--" || t.text == "-" {
+			return false
+		}
+		if strings.ContainsAny(t.text[1:], "vV") {
+			return true
+		}
+	}
+	return false
 }
 
 func skipWrapperFlags(tokens []token, i int, wrapper string, d dialect) int {
@@ -580,13 +621,62 @@ func isIDValue(arg string) bool {
 	return digitsRe.MatchString(arg) || strings.HasPrefix(arg, "$") || arg == "{}"
 }
 
+// in bash only the command word can call a kill method, an argument such as grep terminate is data
 func isKiller(s segment) bool {
+	if s.shell == bashDialect {
+		return killers[s.cmd] || methodKillRe.MatchString(s.cmd)
+	}
 	return killers[s.cmd] || methodKillRe.MatchString(s.text)
 }
 
 func isByNameLister(s segment) bool {
-	return (listers[s.cmd] && !slices.ContainsFunc(s.args, isIDParameter)) ||
+	return (listers[s.cmd] && !slices.ContainsFunc(s.args, isIDParameter) && !(s.shell == bashDialect && s.cmd == "pgrep" && listsChildrenOnly(s.args))) ||
 		(cimListers[s.cmd] && win32ProcessRe.MatchString(s.text))
+}
+
+var (
+	pgrepValueFlags = wordSet("--delimiter", "--pgroup", "--group", "--older", "--parent", "--session", "--signal", "--terminal", "--euid", "--uid", "--pidfile", "--runstates", "--cgroup", "--ns", "--nslist")
+	pgrepShortValue = "dgGOPstuUFr"
+)
+
+// pgrep -P picks the children of a process id and no name, unless a pattern narrows it by name
+// or -v turns it into every other process
+func listsChildrenOnly(args []string) bool {
+	parent := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return parent && i == len(args)-1
+		case strings.HasPrefix(a, "--"):
+			name, _, glued := strings.Cut(a, "=")
+			switch {
+			case name == "--inverse":
+				return false
+			case name == "--parent":
+				parent = true
+			}
+			if !glued && pgrepValueFlags[name] {
+				i++
+			}
+		case strings.HasPrefix(a, "-") && len(a) > 1:
+			for k := 1; k < len(a); k++ {
+				if a[k] == 'v' {
+					return false
+				}
+				if strings.IndexByte(pgrepShortValue, a[k]) >= 0 {
+					parent = parent || a[k] == 'P'
+					if k == len(a)-1 {
+						i++
+					}
+					break
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return parent
 }
 
 func containsByNameLister(text string, d dialect, depth int) bool {
@@ -765,8 +855,9 @@ func checkKillRules(st statement, d dialect, depth int) string {
 		if isByNameLister(s) && methodKillRe.MatchString(s.text) {
 			return killReason
 		}
+		// in bash the rules above already read every command word, and a word in an argument is data
 		lower := strings.ToLower(s.unquotedText)
-		if listerWordRe.MatchString(lower) && killWordRe.MatchString(lower) {
+		if d == powershellDialect && listerWordRe.MatchString(lower) && killWordRe.MatchString(lower) {
 			return killReason
 		}
 	}

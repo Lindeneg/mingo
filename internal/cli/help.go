@@ -297,11 +297,12 @@ The hooks Claude Code runs before a tool call, which mingo install writes into
 ~/.claude/settings.json. Each reads the call on stdin and prints a denial, or nothing.
 
   write   lets Edit, Write and NotebookEdit write only inside the session's project, the temp
-          folder outside mingo's state folder, and its memory and plan folders, by their real paths
+          folder (and /tmp on macOS) outside mingo's state folder, and its memory and plan
+          folders, by their real paths
   bash    denies a Bash or PowerShell command that ends a process by its name: pkill, killall,
-          pgrep or pidof feeding a kill or a loop that kills, taskkill /IM, Stop-Process -Name
-          and their kin, also inside bash -c, eval and a command substitution. It also denies
-          kill -1, which ends every process.
+          pgrep or pidof by name feeding a kill or a loop that kills, taskkill /IM,
+          Stop-Process -Name and their kin, also inside bash -c, eval and a command
+          substitution. It also denies kill -1, which ends every process.
 
 They are guards against slips, not a sandbox.
 `,

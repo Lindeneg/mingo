@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -158,6 +159,100 @@ func TestWriteDeniesALinkInsideTheProjectThatLeadsOut(t *testing.T) {
 	}
 	if denied(t, c.write(t, "inside/new.txt", "")) {
 		t.Fatal("a new file inside the project")
+	}
+}
+
+func TestWriteJudgesALinkWhoseTargetIsMissingByThatTarget(t *testing.T) {
+	c := newWriteCase(t)
+	outside := filepath.Join(filepath.Dir(c.env.Home), "outside")
+	for _, dir := range []string{c.project, outside, c.env.TempDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		"out":     filepath.Join(outside, "missing.txt"),
+		"outdir":  filepath.Join(outside, "missing"),
+		"rel":     "../../../../outside/missing.txt",
+		"chain":   "out",
+		"build":   "dist/next.txt",
+		"scratch": filepath.Join(c.env.TempDir, "missing.txt"),
+	} {
+		if err := os.Symlink(target, filepath.Join(c.project, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{"out", "outdir/new.txt", "rel", "chain", filepath.Join(c.project, "out")} {
+		if !denied(t, c.write(t, path, "")) {
+			t.Fatal(path)
+		}
+	}
+	for _, path := range []string{"build", "scratch"} {
+		if out := c.write(t, path, ""); out != "" {
+			t.Fatal(path, out)
+		}
+	}
+}
+
+func TestWriteAllowsTheSystemTempFolderOnlyWhenItIsGiven(t *testing.T) {
+	c := newWriteCase(t)
+	root := filepath.Dir(c.env.Home)
+	private := filepath.Join(root, "private", "tmp")
+	if err := os.MkdirAll(private, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "systmp")
+	if err := os.Symlink(private, link); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		filepath.Join(link, "claude-501", "scratchpad", "notes.md"),
+		filepath.Join(private, "claude-501", "scratchpad", "notes.md"),
+	}
+	for _, path := range paths {
+		if !denied(t, c.write(t, path, "")) {
+			t.Fatal("allowed without a system temp folder", path)
+		}
+	}
+	c.env.SystemTempDir = link
+	for _, path := range paths {
+		if out := c.write(t, path, ""); out != "" {
+			t.Fatal(path, out)
+		}
+	}
+	c.env.StateDir = filepath.Join(link, "mingo")
+	out := c.write(t, filepath.Join(private, "mingo", "heavy", "slot-1"), "")
+	if !denied(t, out) || !strings.Contains(out, "is in mingo's state folder") {
+		t.Fatal(out)
+	}
+}
+
+func TestWriteEnvAddsSlashTmpBesideTMPDIROnlyOnMacOS(t *testing.T) {
+	t.Setenv("TMPDIR", "/var/folders/xy/T")
+	env := WriteEnvFromOS()
+	want := ""
+	if runtime.GOOS == "darwin" {
+		want = "/tmp"
+	}
+	if env.TempDir != "/var/folders/xy/T" || env.SystemTempDir != want {
+		t.Fatalf("%+v", env)
+	}
+	t.Setenv("TMPDIR", "")
+	if env := WriteEnvFromOS(); env.TempDir != "/tmp" {
+		t.Fatalf("%+v", env)
+	}
+}
+
+func TestWriteAllowsSlashTmpAndPrivateTmpOnMacOS(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+	c := newWriteCase(t)
+	c.env.SystemTempDir = WriteEnvFromOS().SystemTempDir
+	for _, path := range []string{"/tmp/claude-501/x/scratchpad/notes.md", "/private/tmp/claude-501/x/scratchpad/notes.md"} {
+		if out := c.write(t, path, ""); out != "" {
+			t.Fatal(path, out)
+		}
 	}
 }
 
