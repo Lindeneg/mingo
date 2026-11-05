@@ -187,6 +187,11 @@ func joinWith(items []string, word string) string {
 	return strings.Join(items[:len(items)-1], ", ") + " " + word + " " + items[len(items)-1]
 }
 
+// flags mingo new cannot read, a mistake in the command line rather than in an answer
+type FlagError struct{ error }
+
+func (f FlagError) Unwrap() error { return f.error }
+
 // a check's error that answering again cannot put right, so the question ends with it
 type final struct{ error }
 
@@ -316,7 +321,7 @@ func (k *Kit) New(name string, flags map[string][]string, d NewDeps) (Made, erro
 		}
 	}
 	if err := r.readFlags(flags); err != nil {
-		return Made{}, err
+		return Made{}, FlagError{err}
 	}
 	preset, err := r.choosePreset()
 	if err != nil {
@@ -609,6 +614,20 @@ func (r *newRun) check(ask Ask, v string, hasDefault bool) error {
 				return fmt.Errorf("the role %s makes the tmux session %s-%s, which the project %s has for its role %s, rename the role", role, r.a.values["name"], role, other, theirs)
 			}
 		}
+		// the lead's skill is .claude/skills/<lead>, so a role named like one of the kit's skills cannot lead
+		skills, reserved := r.k.skillFolders(), 0
+		for _, role := range items {
+			if contains(skills, role) {
+				reserved++
+			}
+		}
+		switch {
+		case reserved < len(items):
+		case len(items) == 1:
+			return fmt.Errorf("the role %s cannot lead, the lead's skill would take .claude/skills/%s, the folder of the kit's own %s skill, rename the role", items[0], items[0], items[0])
+		default:
+			return fmt.Errorf("none of the roles %s can lead, the lead's skill would take the folder of one of the kit's own skills in .claude/skills, rename one", joinWith(items, "and"))
+		}
 	case "workflow.gate":
 		for _, c := range items {
 			for _, s := range shellSyntax {
@@ -620,6 +639,9 @@ func (r *newRun) check(ask Ask, v string, hasDefault bool) error {
 	case "lead":
 		if roles := r.a.list("roles"); !contains(roles, v) {
 			return fmt.Errorf("%q is none of the roles %s", v, joinWith(roles, "and"))
+		}
+		if contains(r.k.skillFolders(), v) {
+			return fmt.Errorf("%s cannot lead, the lead's skill would take .claude/skills/%s, the folder of the kit's own %s skill, pick another role", v, v, v)
 		}
 	case "workflow.checks":
 		for _, c := range items {

@@ -29,17 +29,27 @@ func TestNewChecksTheNameAndEveryFlagBeforeItWritesAnything(t *testing.T) {
 		`mingo: --roles: "Lead" is not a role name, use lowercase letters, digits and hyphens`:                {"demo", "--preset", "bare", "--repo", "x/demo", "--roles", "Lead"},
 		"mingo: --repo: there is no repository x/nope on GitHub, or gh's account cannot see it":               {"demo", "--preset", "bare", "--repo", "x/nope"},
 		"mingo: --ci-run is only for --ci-stack go or other, not pnpm":                                        {"demo", "--preset", "solo", "--repo", "x/demo", "--ci-run=test=go test"},
-		"mingo: --repo is given 2 times, give it once":                                                        {"demo", "--preset=bare", "--repo", "x/demo", "--repo=x/demo"},
-		"mingo: --roles has an empty value":                                                                   {"demo", "--preset", "bare", "--repo", "x/demo", "--roles", ""},
-		"mingo: --repo needs a value":                                                                         {"demo", "--preset", "bare", "--repo", "--roles", "lead"},
-		`mingo: "extra" is not a flag, mingo new takes the name and then --<key> <value> flags`:               {"demo", "extra"},
-		`mingo: "Demo" is not a project name, use lowercase letters, digits and hyphens`:                      {"Demo", "--preset", "bare"},
 		"mingo: sh is the id of the project shop, pick another name":                                          {"sh", "--preset", "bare"},
 		"mingo: shop is already a project, its config is " + filepath.Join(h.config, "projects", "shop.toml"): {"shop", "--preset", "bare"},
 		"mingo: mingo new needs --preset, one of bare solo team full":                                         {"demo"},
 	} {
 		r := h.mingo(append([]string{"new"}, args...)...)
 		if r.code != 1 || r.out != want+"\n" || exists(file) {
+			t.Fatalf("%v\n%d %q", args, r.code, r.out)
+		}
+	}
+	usage := "usage: mingo new <name> --preset <preset> [--<key> <value>]...\n"
+	for want, args := range map[string][]string{
+		"": nil,
+		"mingo: --repo is given 2 times, give it once\n":                                               {"demo", "--preset=bare", "--repo", "x/demo", "--repo=x/demo"},
+		"mingo: --roles has an empty value\n":                                                          {"demo", "--preset", "bare", "--repo", "x/demo", "--roles", ""},
+		"mingo: --repo needs a value\n":                                                                {"demo", "--preset", "bare", "--repo", "--roles", "lead"},
+		"mingo: mingo new knows no --colour, mingo help new lists its flags\n":                         {"demo", "--preset", "bare", "--colour", "red"},
+		`mingo: "extra" is not a flag, mingo new takes the name and then --<key> <value> flags` + "\n": {"demo", "extra"},
+		`mingo: "Demo" is not a project name, use lowercase letters, digits and hyphens` + "\n":        {"Demo", "--preset", "bare"},
+	} {
+		r := h.mingo(append([]string{"new"}, args...)...)
+		if r.code != 2 || r.out != want+usage || exists(file) {
 			t.Fatalf("%v\n%d %q", args, r.code, r.out)
 		}
 	}

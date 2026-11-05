@@ -124,8 +124,6 @@ func (e *env) secret(args []string) error {
 	return kit.SetReviewSecret(d, token)
 }
 
-const newUsage = "new <name> [--preset bare|solo|team|full] [--<key> <value>]"
-
 // the flags after the name, each with its value, or true when one of them asks for help
 func newFlags(args []string) (map[string][]string, bool, error) {
 	for _, arg := range args {
@@ -156,18 +154,18 @@ const stoppedNew = "stopped, nothing was written"
 
 func (e *env) newProject(args []string) error {
 	if len(args) == 0 {
-		return errors.New(newUsage)
+		return badUsage("", "new")
 	}
 	name := args[0]
 	if !config.IsName(name) {
-		return fmt.Errorf("%q is not a project name, use lowercase letters, digits and hyphens", name)
+		return badUsage(fmt.Sprintf("%q is not a project name, use lowercase letters, digits and hyphens", name), "new")
 	}
 	flags, help, err := newFlags(args[1:])
 	if help {
 		return e.help([]string{"new"})
 	}
 	if err != nil {
-		return err
+		return badUsage(err.Error(), "new")
 	}
 	file := config.File(name)
 	if known, ok := config.NameOf(name); ok && known != name {
@@ -210,10 +208,13 @@ func (e *env) newProject(args []string) error {
 		return exitError(130)
 	}
 	made, err := k.New(name, flags, d)
-	if errors.Is(err, sys.ErrStopped) {
+	var flagErr kit.FlagError
+	switch {
+	case errors.Is(err, sys.ErrStopped):
 		return stopped()
-	}
-	if err != nil {
+	case errors.As(err, &flagErr):
+		return badUsage(err.Error(), "new")
+	case err != nil:
 		return err
 	}
 	if prompter != nil {

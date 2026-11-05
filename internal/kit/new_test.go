@@ -423,6 +423,46 @@ func TestNoTrackerLeavesTheTrackerModuleOut(t *testing.T) {
 	}
 }
 
+func TestARoleNamedLikeOneOfTheKitsSkillsCannotLead(t *testing.T) {
+	for want, flags := range map[string]map[string][]string{
+		"task-flow cannot lead, the lead's skill would take .claude/skills/task-flow, the folder of the kit's own task-flow skill, pick another role, so give --lead":  {"--roles": {"task-flow, dev"}},
+		"--lead: spend cannot lead, the lead's skill would take .claude/skills/spend, the folder of the kit's own spend skill, pick another role":                      {"--roles": {"dev, spend"}, "--lead": {"spend"}},
+		"--roles: the role task-flow cannot lead, the lead's skill would take .claude/skills/task-flow, the folder of the kit's own task-flow skill, rename the role":  {"--roles": {"task-flow"}},
+		"--roles: none of the roles spend and task-flow can lead, the lead's skill would take the folder of one of the kit's own skills in .claude/skills, rename one": {"--roles": {"spend, task-flow"}},
+	} {
+		flags["--preset"], flags["--repo"] = []string{"team"}, []string{"x/demo"}
+		if _, err := newFrom(t, flags); err == nil || err.Error() != want {
+			t.Fatal(want, "\n", err)
+		}
+	}
+	made, err := newFrom(t, map[string][]string{"--preset": {"team"}, "--repo": {"x/demo"}, "--roles": {"task-flow, dev"}, "--lead": {"dev"}})
+	if err != nil || project(t, made.TOML).Lead != "dev" {
+		t.Fatal(err, made.TOML)
+	}
+	s := &script{answers: map[string][]string{"the GitHub repository, as owner/name": {"x/demo"}, "the roles, in the order they start": {"task-flow, dev"}, "the role that merges": {"", "dev"}}}
+	if made, err := newAt(t, s, map[string][]string{"--preset": {"bare"}}); err != nil || !strings.Contains(made.TOML, `lead = "dev"`) || len(s.problems) != 1 || !strings.HasPrefix(s.problems[0], "task-flow cannot lead") {
+		t.Fatal(err, s.problems, made.TOML)
+	}
+}
+
+func TestAFlagMingoNewCannotReadIsAMistakeOfTheCommandLineAndABadAnswerIsNot(t *testing.T) {
+	for _, flags := range []map[string][]string{
+		{"--preset": {"bare"}, "--colour": {"red"}},
+		{"--preset": {"bare", "solo"}},
+		{"--preset": {"bare"}, "--repo": {" "}},
+		{"--preset": {"solo"}, "--ci-run": {"test"}},
+	} {
+		var flagErr FlagError
+		if _, err := newFrom(t, flags); !errors.As(err, &flagErr) {
+			t.Fatal(flags, err)
+		}
+	}
+	var flagErr FlagError
+	if _, err := newFrom(t, map[string][]string{"--preset": {"bare"}, "--repo": {"foo"}}); err == nil || errors.As(err, &flagErr) {
+		t.Fatal(err)
+	}
+}
+
 func TestARoleWhoseSessionAnotherProjectHasIsRefused(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("MINGO_CONFIG", root)
