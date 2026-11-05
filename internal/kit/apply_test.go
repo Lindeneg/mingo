@@ -408,11 +408,11 @@ func TestDoctorRunsACheckThatTwoModulesShareOnce(t *testing.T) {
 	w := newWorld(t, false)
 	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nchecks = [\"labels\"]\n")}
 	w.fsys["tracker/module.toml"] = &fstest.MapFile{Data: []byte("does = \"tracker\"\nchecks = [\"labels\"]\n")}
-	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"workflow\", \"tracker\"]\n[[roles]]\nname = \"chief\"\n"
+	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"workflow\", \"tracker\"]\n[tracker]\nkind = \"github\"\n[[roles]]\nname = \"chief\"\n"
 	w.apply()
 	w.merge()
 	missing, out, err := w.doctor()
-	if err != nil || strings.Count(out, "the label ci-unavailable on x/demo") != 1 || missing != 1 {
+	if err != nil || strings.Count(out, "the label ci-unavailable on x/demo") != 1 || strings.Count(out, "the label chief on x/demo") != 1 || missing != 2 {
 		t.Fatal(missing, err, out)
 	}
 }
