@@ -300,9 +300,10 @@ The hooks Claude Code runs before a tool call, which mingo install writes into
           folder (and /tmp on macOS) outside mingo's state folder, and its memory and plan
           folders, by their real paths
   bash    denies a Bash or PowerShell command that ends a process by its name: pkill, killall,
-          pgrep or pidof by name feeding a kill or a loop that kills, taskkill /IM,
-          Stop-Process -Name and their kin, also inside bash -c, eval and a command
-          substitution. It also denies kill -1, which ends every process.
+          pgrep or pidof by name feeding a kill or a loop that kills, kill given a name, also
+          through xargs or a loop, taskkill /IM, Stop-Process -Name and their kin, also inside
+          bash -c, eval, ssh, sudo and the like, and a command substitution. It also denies
+          kill -1, which ends every process.
 
 They are guards against slips, not a sandbox.
 `,
