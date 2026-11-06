@@ -146,7 +146,11 @@ func (l *loop) watch(ctx context.Context) {
 }
 
 func (l *loop) args() []string {
-	args := []string{l.p.OpenerFor(l.role), "--name", l.name}
+	opener := l.p.OpenerFor(l.role)
+	if l.p.CanBeAway() && config.Away(l.p.Name) {
+		opener += " " + config.AwayOpener
+	}
+	args := []string{opener, "--name", l.name}
 	if m := l.p.Model(l.role); m != "" {
 		args = append(args, "--model", m)
 	}

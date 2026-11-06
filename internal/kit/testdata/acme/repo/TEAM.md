@@ -25,7 +25,7 @@ The rules:
 6. Shared files take appends at the end of their lists, so two pull requests meet in one small conflict at most: the route list and a catalog.
 7. Nobody adds a step that approves a pull request, dismisses a review or greens a check. When a repository rule, a secret or a setting blocks the flow, the lead tells the owner in its next message and meanwhile takes the `ci-unavailable` path of the `task-flow` skill.
 8. No attribution footers in commits, pull requests or comments.
-9. Decisions follow the Working alone rule above: the recommended default, recorded as decided provisionally, and on with the work.
+9. While the owner is away, decisions follow Working alone above. Otherwise a question the documents do not answer goes with a recommended default to the lead, who asks the owner, and the work that does not depend on it goes on.
 
 ## Working economically
 

@@ -36,6 +36,8 @@ left out inside a project's clone, with MINGO_PROJECT set, or with a default pro
   mingo peek <target> [lines]           the last lines of a session's screen
   mingo say <target> <message>          type a message into a session
   mingo clear                           from inside a session, end it so the loop starts a fresh one
+  mingo away <project>                  the owner is away, the sessions take defaults instead of asking
+  mingo back <project>                  the owner is back, the sessions ask again
   mingo path <target>                   a role's clone
   mingo memory <target>                 a role's handoff memory
   mingo repo [project]                  a project's GitHub repository
@@ -165,7 +167,7 @@ func subcommand(args []string, command string, actions ...string) error {
 // the most arguments of each command that takes no flag and leaves its arguments to this check
 var most = map[string]int{
 	"ls": 0, "agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
-	"repo": 1, "default": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
+	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
 }
 
 var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
@@ -275,6 +277,10 @@ func (e *env) dispatch(args []string) error {
 		return e.say(args)
 	case "clear":
 		return e.clear()
+	case "away":
+		return e.away(arg(0), true)
+	case "back":
+		return e.away(arg(0), false)
 	case "path":
 		return e.path(arg(0))
 	case "memory":

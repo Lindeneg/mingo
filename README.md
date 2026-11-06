@@ -32,6 +32,8 @@ left out inside a project's clone, with MINGO_PROJECT set, or with a default pro
   mingo peek <target> [lines]           the last lines of a session's screen
   mingo say <target> <message>          type a message into a session
   mingo clear                           from inside a session, end it so the loop starts a fresh one
+  mingo away <project>                  the owner is away, the sessions take defaults instead of asking
+  mingo back <project>                  the owner is back, the sessions ask again
   mingo path <target>                   a role's clone
   mingo memory <target>                 a role's handoff memory
   mingo repo [project]                  a project's GitHub repository
