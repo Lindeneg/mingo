@@ -25,36 +25,47 @@ const usage = `mingo runs Claude Code sessions for every project on this machine
 A target is <project>/<role>. A role may be an alias and a project its id, and the project may be
 left out inside a project's clone, with MINGO_PROJECT set, or with a default project.
 
-  mingo ls                              projects, roles and clones
+Sessions
   mingo agents [project...]             live sessions with state, uptime and Remote Control link
-  mingo status [project...]             each role's state, model and effort, and the Claude login
-  mingo start [--autostart] [target...] start roles, a whole project when no role is named
-  mingo stop [target...]                ask sessions to exit, close what is left after a minute and a half
-  mingo restart [--force] <target>      end a session where it stands, the loop starts a fresh one
   mingo attach <target>                 attach, detach with Ctrl+B then D
-  mingo ro <target>                     attach read only
-  mingo peek <target> [lines]           the last lines of a session's screen
-  mingo say <target> <message>          type a message into a session
+  mingo away <project>                  the owner is away, the sessions take defaults instead of asking
+  mingo back <project>                  the owner is back, the sessions ask again
   mingo clear                           from inside a session, end it so the loop starts a fresh one
-  mingo path <target>                   a role's clone
-  mingo memory <target>                 a role's handoff memory
-  mingo repo [project]                  a project's GitHub repository
+  mingo peek <target> [lines]           the last lines of a session's screen
+  mingo restart [--force] <target>      end a session where it stands, the loop starts a fresh one
+  mingo ro <target>                     attach read only
+  mingo say <target> <message>          type a message into a session
+  mingo start [--autostart] [target...] start roles, a whole project when no role is named
+  mingo status [project...]             each role's state, model and effort, and the Claude login
+  mingo stop [target...]                ask sessions to exit, close what is left after a minute and a half
+
+Projects
   mingo default [project]               show or set the default project
+  mingo ls                              projects, roles and clones
+  mingo memory <target>                 a role's handoff memory
+  mingo path <target>                   a role's clone
   mingo project add|show|edit <name>    a project's config in ~/.config/mingo/projects
-  mingo setup <project>                 clone missing roles and make their memory folders
-  mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
-  mingo apply <project>                 land the files of the project's modules through a pull request
-  mingo doctor <project>                what of the project's modules is in place and what is missing
-  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
-  mingo secret review <project>         set the review's token from what claude setup-token printed
+  mingo repo [project]                  a project's GitHub repository
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
-  mingo install                         the command, tmux and Claude settings
+  mingo setup <project>                 clone missing roles and make their memory folders
+
+Kit
+  mingo apply <project>                 land the files of the project's modules through a pull request
+  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
+  mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
+  mingo secret review <project>         set the review's token from what claude setup-token printed
+
+Team
+  mingo gate <log>                      run the project's gate targets into a log, stopping at the first red one
   mingo heavy <label> -- <command...>   run a heavy command in one of the machine's memory slots
   mingo pr merge <number>               check a ready pull request, then squash merge it
   mingo pr rebase <branch>              rebase a branch onto the base in a worktree, keeping both sides of the shared lists
-  mingo gate <log>                      run the project's gate targets into a log, stopping at the first red one
-  mingo version                         this mingo's version
+
+Other
   mingo help [command]                  this list, or what a command does
+  mingo install                         the command, tmux and Claude settings
+  mingo version                         this mingo's version
 
 mingo help <command> explains a command, and so does mingo <command> --help.
 `
@@ -165,7 +176,7 @@ func subcommand(args []string, command string, actions ...string) error {
 // the most arguments of each command that takes no flag and leaves its arguments to this check
 var most = map[string]int{
 	"ls": 0, "agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
-	"repo": 1, "default": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
+	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
 }
 
 var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
@@ -275,6 +286,10 @@ func (e *env) dispatch(args []string) error {
 		return e.say(args)
 	case "clear":
 		return e.clear()
+	case "away":
+		return e.away(arg(0), true)
+	case "back":
+		return e.away(arg(0), false)
 	case "path":
 		return e.path(arg(0))
 	case "memory":

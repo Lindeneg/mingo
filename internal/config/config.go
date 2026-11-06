@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -61,6 +62,26 @@ func File(name string) string {
 // with claude_files local the project's CLAUDE.md is kept here, out of every repository
 func ClaudeFile(name string) string {
 	return filepath.Join(Dir(), "projects", name, "CLAUDE.md")
+}
+
+// the owner's away mode is kept beside the project's config, so it outlasts a reboot
+func AwayFile(name string) string {
+	return filepath.Join(Dir(), "projects", name, "away")
+}
+
+func Away(name string) bool {
+	return exists(AwayFile(name))
+}
+
+const (
+	AwayOpener = "The owner is away, so work by Working alone in TEAM.md until told the owner is back."
+	AwayTold   = "The owner is away from now on, so work by Working alone in TEAM.md until told the owner is back."
+	BackTold   = "The owner is back, so Working alone in TEAM.md no longer applies, ask as TEAM.md says."
+)
+
+// TEAM.md has the rules for when the owner is away
+func (p *Project) CanBeAway() bool {
+	return slices.Contains(p.Modules, "team")
 }
 
 func exists(path string) bool {

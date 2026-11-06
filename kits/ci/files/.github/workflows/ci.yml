@@ -27,7 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # gitleaks scans the history of the pull request's commits.
+          # gitleaks scans the history of the pull request's commits, and semgrep
+          # needs the base commit to compare with.
           fetch-depth: 0
 [[- if or (ne $.CI.Stack "other") $.CI.Setup]]
       - uses: ./.github/actions/setup
@@ -54,8 +55,12 @@ jobs:
           # The log and the job summary carry the findings; no comment on the pull request.
           GITLEAKS_ENABLE_COMMENTS: "false"
       - name: Semgrep, community rules
-        # The pinned container, the community ruleset, no metrics; any finding fails.
-        run: docker run --rm -v "$PWD:/src" semgrep/semgrep:1.180.0 semgrep scan --config p/default --error --metrics=off
+        # The pinned container, the community ruleset, no metrics. On a pull request only a
+        # finding it adds fails, against its base; by hand every finding does. Actions stay
+        # on their major tags, so the rule that asks for commit SHAs is skipped.
+        env:
+          SEMGREP_BASELINE_COMMIT: ${{ github.event.pull_request.base.sha }}
+        run: docker run --rm -e SEMGREP_BASELINE_COMMIT -v "$PWD:/src" semgrep/semgrep:1.180.0 semgrep scan --config p/default --error --metrics=off --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
 [[- else]]
   [[$check]]:
     runs-on: ubuntu-latest

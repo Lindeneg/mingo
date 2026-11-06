@@ -353,9 +353,19 @@ It is not for running by hand.
 `,
 }
 
+const awayText = `away says the owner is away. Each running session of the project is told at once and each fresh
+session's opener says so, and the sessions then work by the Working alone section of TEAM.md, which
+takes the recommended default instead of asking. back says the owner is back, and the running
+sessions are told so. A session between two is told by its next opener. The mode is kept in
+~/.config/mingo/projects/<project>/away, so it outlasts a reboot, and it needs the team module,
+whose TEAM.md has the rules.
+`
+
 func init() {
 	pages["secret review"] = pages["secret"]
 	pages["claude edit"] = pages["claude"]
+	pages["away"] = "mingo away <project>\nmingo back <project>\n\n" + awayText
+	pages["back"] = "mingo back <project>\nmingo away <project>\n\n" + awayText
 }
 
 func (e *env) newPage() string {

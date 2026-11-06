@@ -18,7 +18,14 @@ const isWindows = process.platform === "win32";
 // shim's alone and is passed on, as are SIGTERM and SIGHUP.
 const run = (file, args, env) =>
   new Promise((resolve, reject) => {
-    const child = spawn(file, args, { stdio: "inherit", env, shell: isWindows });
+    // npm and pnpm are .cmd files on Windows, which only cmd.exe runs.
+    const child = isWindows
+      ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `"${[file, ...args].join(" ")}"`], {
+          stdio: "inherit",
+          env,
+          windowsVerbatimArguments: true,
+        })
+      : spawn(file, args, { stdio: "inherit", env });
     const forward = (signal) => child.kill(signal);
     const onInterrupt = (signal) => {
       if (process.stdin.isTTY !== true) forward(signal);
