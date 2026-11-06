@@ -236,6 +236,7 @@ func init() {
 	checks["linear"] = func(d Deps, r *report) {
 		if d.Project.Tracker.Kind == "linear" {
 			r.findings = append(r.findings, finding{text: "the Linear connector on the Claude account the sessions use, at claude.ai under Settings, Connectors", owner: true})
+			r.findings = append(r.findings, finding{text: fmt.Sprintf("the Linear team %s, made in Linear with exactly that identifier, since the connector cannot make a team", d.Project.Tracker.Team), owner: true})
 		}
 	}
 	checks["review-token"] = func(d Deps, r *report) {
