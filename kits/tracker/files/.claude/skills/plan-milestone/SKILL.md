@@ -57,6 +57,7 @@ Body, every section present:
 
 {{block "mechanics" .}}{{if eq .Tracker.Kind "linear"}}## Linear mechanics
 
+- The team `{{.Tracker.Team}}` is the owner's to make, with exactly that identifier, since the connector cannot make a team. While it does not exist, the {{spaced .Lead}} tells the owner in its next message.
 - While the project `{{.Tracker.Project}}` does not exist in Linear, making it, its milestones in order with each one's "done means" as its description, and the role labels through the connector is the {{spaced .Lead}}'s first task.
 - Issues are created with the connector (`save_issue`), one call each, in dependency order so the ids read in order.
 - An issue's state is changed only by its owner session ({{if eq .Tracker.Kind "linear"}}Todo{{else}}open{{end}} to In Progress) or by the pull request's merge (to Done); the {{spaced .Lead}} cancels with a comment that says why.{{else}}## GitHub mechanics

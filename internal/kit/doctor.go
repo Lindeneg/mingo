@@ -236,6 +236,7 @@ func init() {
 	checks["linear"] = func(d Deps, r *report) {
 		if d.Project.Tracker.Kind == "linear" {
 			r.findings = append(r.findings, finding{text: "the Linear connector on the Claude account the sessions use, at claude.ai under Settings, Connectors", owner: true})
+			r.findings = append(r.findings, finding{text: fmt.Sprintf("the Linear team %s, made in Linear with exactly that identifier, since the connector cannot make a team", d.Project.Tracker.Team), owner: true})
 		}
 	}
 	checks["review-token"] = func(d Deps, r *report) {
@@ -319,6 +320,23 @@ func Doctor(d Deps) (int, error) {
 		return 0, err
 	}
 	missing += d.report(steps)
+	rendered := files
+	if p.ClaudeLocal() {
+		repo, local, err := d.split(mods, files)
+		if err != nil {
+			return 0, err
+		}
+		rendered = append(repo, local...)
+	}
+	if open, used := prettierOpen(co.read, rendered); used {
+		if len(open) == 0 {
+			fmt.Fprintln(d.Out, "    in place: mingo's files out of Prettier in .prettierignore")
+		}
+		for _, path := range open {
+			fmt.Fprintf(d.Out, "    missing: %s in .prettierignore, since Prettier would rewrite it (add it by hand)\n", path)
+		}
+		missing += len(open)
+	}
 	if p.ClaudeLocal() {
 		_, local, err := d.split(mods, files)
 		if err != nil {

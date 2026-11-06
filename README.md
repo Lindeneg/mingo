@@ -158,7 +158,7 @@ does = "codes the issues labelled dev"
 
 [tracker]
 kind = "linear"                    # linear, github or none, none by default, with which the tracker module does nothing
-team = "ENG"                       # the Closes line then names ENG-n
+team = "ENG"                       # the Linear team's identifier, which you set when you make the team, and the Closes line then names ENG-n
 project = "Shop"
 
 [workflow]

@@ -57,6 +57,7 @@ Fields: team `ACM`, project `Acme Shop`, the milestone, the label `<role>`, prio
 
 ## Linear mechanics
 
+- The team `ACM` is the owner's to make, with exactly that identifier, since the connector cannot make a team. While it does not exist, the lead tells the owner in its next message.
 - While the project `Acme Shop` does not exist in Linear, making it, its milestones in order with each one's "done means" as its description, and the role labels through the connector is the lead's first task.
 - Issues are created with the connector (`save_issue`), one call each, in dependency order so the ids read in order.
 - An issue's state is changed only by its owner session (Todo to In Progress) or by the pull request's merge (to Done); the lead cancels with a comment that says why.

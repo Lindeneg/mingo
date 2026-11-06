@@ -417,6 +417,19 @@ func TestDoctorRunsACheckThatTwoModulesShareOnce(t *testing.T) {
 	}
 }
 
+func TestDoctorTellsTheOwnerToMakeTheLinearTeamWithExactlyItsIdentifier(t *testing.T) {
+	w := newWorld(t, false)
+	w.fsys["tracker/module.toml"] = &fstest.MapFile{Data: []byte("does = \"tracker\"\nchecks = [\"linear\"]\n")}
+	w.config = "repo = \"x/demo\"\nmodules = [\"skills\", \"tracker\"]\n[tracker]\nkind = \"linear\"\nteam = \"LTET\"\n[[roles]]\nname = \"chief\"\n"
+	w.apply()
+	w.merge()
+	missing, out, err := w.doctor()
+	want := "    only you can: the Linear connector on the Claude account the sessions use, at claude.ai under Settings, Connectors\n    only you can: the Linear team LTET, made in Linear with exactly that identifier, since the connector cannot make a team\n"
+	if err != nil || !strings.Contains(out, want) || missing != 0 {
+		t.Fatal(missing, err, out)
+	}
+}
+
 func TestDoctorSaysWhatItCouldNotCheckAndCountsNoneOfItAsMissing(t *testing.T) {
 	w := newWorld(t, false)
 	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nchecks = [\"labels\"]\n")}

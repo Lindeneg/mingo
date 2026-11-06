@@ -14,7 +14,7 @@ choices = [
 
 [[asks]]
 key = "tracker.team"
-question = "the Linear team's key"
+question = "the Linear team's key, the identifier you give the team in Linear"
 when = "tracker.kind=linear"
 
 [[asks]]
