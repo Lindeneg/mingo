@@ -215,9 +215,10 @@ setup comes first.
 Says what of the project's modules is in place and what is missing, with the command that fixes
 each, and the steps only the owner can take, such as the review's token. It reads the base branch,
 so a file waiting in the kit's pull request counts as missing. With claude_files = "local" it reads
-Claude's files in every clone too. What it cannot find out, such as the labels while gh is logged
-out, it names with gh's error and counts as neither. It exits 1 while anything is missing or could
-not be checked.
+Claude's files in every clone too. Where package.json has Prettier, it names each of mingo's files
+that neither .gitignore nor .prettierignore keeps out of it, since a format would rewrite them and
+break their hashes. What it cannot find out, such as the labels while gh is logged out, it names
+with gh's error and counts as neither. It exits 1 while anything is missing or could not be checked.
 `,
 	"secret": `mingo secret review <project>
 

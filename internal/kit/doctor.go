@@ -319,6 +319,23 @@ func Doctor(d Deps) (int, error) {
 		return 0, err
 	}
 	missing += d.report(steps)
+	rendered := files
+	if p.ClaudeLocal() {
+		repo, local, err := d.split(mods, files)
+		if err != nil {
+			return 0, err
+		}
+		rendered = append(repo, local...)
+	}
+	if open, used := prettierOpen(co.read, rendered); used {
+		if len(open) == 0 {
+			fmt.Fprintln(d.Out, "    in place: mingo's files out of Prettier in .prettierignore")
+		}
+		for _, path := range open {
+			fmt.Fprintf(d.Out, "    missing: %s in .prettierignore, since Prettier would rewrite it (add it by hand)\n", path)
+		}
+		missing += len(open)
+	}
 	if p.ClaudeLocal() {
 		_, local, err := d.split(mods, files)
 		if err != nil {
