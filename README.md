@@ -1,6 +1,6 @@
 # mingo
 
-mingo runs multiple claude sessions for multiple projects, one tmux session per role.
+My way to handle multiple remote claude code agents across multiple projects. It was made for myself, so many of the choices may not suit you.
 
 ## Install
 
