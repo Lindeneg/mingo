@@ -1,7 +1,7 @@
 {{block "header" .}}// Runs a heavy script (a check, the tests, a build, the dev server) under one of the
 // machine's slots where mingo is installed, and at once where it is not:
 //
-//     node tools/heavy.mjs check -- {{if eq .CI.Stack "npm"}}npm{{else}}pnpm{{end}} run check:run
+//     node tools/heavy.mjs check -- {{if eq .CI.Stack "npm"}}npm run check:run --{{else}}pnpm run check:run{{end}}
 //
 // The slots are mingo's (`mingo heavy`, shared by every project on the machine): a
 // command waits while the slots are taken or the free memory is low, and one started

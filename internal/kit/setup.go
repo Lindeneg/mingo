@@ -248,8 +248,18 @@ const Manifest = "package.json"
 // an owned step whose file the repository does not have yet, so mingo leaves its part out until it has
 const Absent Action = "absent"
 
+// npm takes the flags after a script's name for its own unless a double dash comes first, while pnpm passes them all on
 func shim(pm, script string) string {
-	return "node tools/heavy.mjs " + script + " -- " + pm + " run " + script + ":run"
+	line := "node tools/heavy.mjs " + script + " -- " + pm + " run " + script + ":run"
+	if pm == "npm" {
+		line += " --"
+	}
+	return line
+}
+
+// the npm line without its double dash is mingo's own too, so apply moves it over
+func isShim(cmd, script string) bool {
+	return cmd == shim("pnpm", script) || cmd == shim("npm", script) || cmd == strings.TrimSuffix(shim("npm", script), " --")
 }
 
 // package.json is the project's own file, so mingo only moves each heavy script behind the shim
@@ -286,7 +296,7 @@ func PlanScripts(mods []Module, p *config.Project, read func(path string) ([]byt
 			return nil, fmt.Errorf("%s has no script %s, which %s names in [heavy] scripts", Manifest, s, p.File)
 		}
 		// a shim of either package manager is mingo's own, with the project's command already moved behind it
-		if cmd == shim("pnpm", s) || cmd == shim("npm", s) {
+		if isShim(cmd, s) {
 			if cmd != shim(pm, s) {
 				scripts.Set(s, shim(pm, s))
 				changed = true

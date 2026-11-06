@@ -42,7 +42,7 @@ func TestPlanScriptsKeepsTheIndentationOfPackageJson(t *testing.T) {
 	if err != nil || len(steps) != 1 || steps[0].Action != Update {
 		t.Fatal(steps, err)
 	}
-	want := "{\n    \"name\": \"demo\",\n    \"scripts\": {\n        \"test:unit\": \"node tools/heavy.mjs test:unit -- npm run test:unit:run\",\n        \"test:unit:run\": \"vitest run\"\n    }\n}\n"
+	want := "{\n    \"name\": \"demo\",\n    \"scripts\": {\n        \"test:unit\": \"node tools/heavy.mjs test:unit -- npm run test:unit:run --\",\n        \"test:unit:run\": \"vitest run\"\n    }\n}\n"
 	if steps[0].File.Text != want {
 		t.Fatal(steps[0].File.Text)
 	}
@@ -68,13 +68,26 @@ func TestPlanScriptsMovesTheShimToTheStacksPackageManagerAndLeavesTheRunScriptAl
 	mods := []Module{{Name: "heavy"}}
 	pkg := "{\n  \"scripts\": {\n    \"test\": \"node tools/heavy.mjs test -- pnpm run test:run\",\n    \"test:run\": \"vitest\"\n  }\n}\n"
 	steps, err := PlanScripts(mods, p, reader(map[string]string{"package.json": pkg}))
-	want := "{\n  \"scripts\": {\n    \"test\": \"node tools/heavy.mjs test -- npm run test:run\",\n    \"test:run\": \"vitest\"\n  }\n}\n"
+	want := "{\n  \"scripts\": {\n    \"test\": \"node tools/heavy.mjs test -- npm run test:run --\",\n    \"test:run\": \"vitest\"\n  }\n}\n"
 	if err != nil || steps[0].Action != Update || steps[0].File.Text != want {
 		t.Fatal(steps, err)
 	}
 	again, err := PlanScripts(mods, p, reader(map[string]string{"package.json": want}))
 	if err != nil || again[0].Action != Same {
 		t.Fatal(again, err)
+	}
+}
+
+func TestPlanScriptsMovesAnNpmShimWithoutItsDoubleDashOverAsMingosOwn(t *testing.T) {
+	mods := []Module{{Name: "heavy"}}
+	old := "{\n  \"scripts\": {\n    \"test\": \"node tools/heavy.mjs test -- npm run test:run\",\n    \"test:run\": \"vitest\"\n  }\n}\n"
+	for stack, line := range map[string]string{"npm": "npm run test:run --", "pnpm": "pnpm run test:run"} {
+		p := project(t, "modules = [\"heavy\"]\n[ci]\nstack = \""+stack+"\"\n[heavy]\nscripts = [\"test\"]\n[[roles]]\nname = \"lead\"\n")
+		steps, err := PlanScripts(mods, p, reader(map[string]string{"package.json": old}))
+		want := "{\n  \"scripts\": {\n    \"test\": \"node tools/heavy.mjs test -- " + line + "\",\n    \"test:run\": \"vitest\"\n  }\n}\n"
+		if err != nil || steps[0].Action != Update || steps[0].File.Text != want {
+			t.Fatal(stack, steps, err)
+		}
 	}
 }
 
