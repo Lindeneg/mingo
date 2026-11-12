@@ -1,2 +1,2 @@
-does = "the write and kill guards in Claude Code's settings"
+does = "the write and kill guards in the agent CLI's settings"
 checks = ["guards"]

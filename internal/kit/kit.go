@@ -29,7 +29,9 @@ type Module struct {
 	Imports []string `toml:"imports"`
 	Lines   []string `toml:"lines"`
 	Asks    []Ask    `toml:"asks"`
-	files   []string
+	// whether its files come from the provider, as a review workflow does
+	Agent bool `toml:"agent"`
+	files []string
 }
 
 type Kit struct {
@@ -94,12 +96,15 @@ func (k *Kit) Names() []string {
 	return names
 }
 
-// the folders the kit's own skills take under .claude/skills, read from the paths that are no template
+// the kit's skills live under skills, and the provider places them in its own skills folder
+const skillsRoot = "skills/"
+
+// the folders the kit's own skills take in the skills folder, read from the paths that are no template
 func (k *Kit) skillFolders() []string {
 	var folders []string
 	for _, m := range k.Modules {
 		for _, name := range m.files {
-			rest, ok := strings.CutPrefix(name, ".claude/skills/")
+			rest, ok := strings.CutPrefix(name, skillsRoot)
 			folder, _, _ := strings.Cut(rest, "/")
 			if ok && folder != "" && !strings.Contains(folder, "{{") && !contains(folders, folder) {
 				folders = append(folders, folder)
@@ -144,6 +149,9 @@ func (k *Kit) For(p *config.Project) ([]Module, error) {
 		}
 		if m.Always {
 			return nil, fmt.Errorf("%s names the module %s, which is always on", p.File, name)
+		}
+		if prov := p.Provider(); m.Agent && len(prov.Kit().Files[name]) == 0 {
+			return nil, fmt.Errorf("%s names the module %s, which %s has no files for", p.File, name, prov.Title())
 		}
 	}
 	var out []Module
@@ -279,11 +287,26 @@ func delims(repoPath string) (string, string) {
 
 // a file whose path or text renders blank is left out, which is how a template says it does not apply
 func (k *Kit) Render(p *config.Project, mods []Module) ([]File, error) {
+	agent := p.Provider().Kit()
 	used := map[string]bool{}
 	from := map[string]string{}
 	var out []File
 	for _, m := range mods {
+		sources := map[string]func() (string, error){}
+		var names []string
 		for _, name := range m.files {
+			sources[name] = func() (string, error) {
+				data, err := fs.ReadFile(k.fsys, path.Join(m.Name, "files", name))
+				return string(data), err
+			}
+			names = append(names, name)
+		}
+		for _, name := range sortedKeys(agent.Files[m.Name]) {
+			text := agent.Files[m.Name][name]
+			sources[name] = func() (string, error) { return text, nil }
+			names = append(names, name)
+		}
+		for _, name := range names {
 			pathTmpl, err := template.New(name).Option("missingkey=error").Funcs(funcs).Parse(name)
 			if err != nil {
 				return nil, fmt.Errorf("module %s: %v", m.Name, err)
@@ -296,18 +319,30 @@ func (k *Kit) Render(p *config.Project, mods []Module) ([]File, error) {
 			if repoPath == "" {
 				continue
 			}
+			if rest, ok := strings.CutPrefix(repoPath, skillsRoot); ok {
+				repoPath = path.Join(agent.Skills, rest)
+			}
 			if first, ok := from[repoPath]; ok {
 				return nil, fmt.Errorf("%s: %s and %s/%s both render %s, so a role is named like one of the kit's files, rename it", p.File, first, m.Name, name, repoPath)
 			}
 			from[repoPath] = m.Name + "/" + name
-			data, err := fs.ReadFile(k.fsys, path.Join(m.Name, "files", name))
+			source, err := sources[name]()
 			if err != nil {
 				return nil, err
 			}
 			left, right := delims(repoPath)
-			t, err := template.New(repoPath).Delims(left, right).Option("missingkey=error").Funcs(funcs).Parse(string(data))
+			t, err := template.New(repoPath).Delims(left, right).Option("missingkey=error").Funcs(funcs).Parse(source)
 			if err != nil {
 				return nil, fmt.Errorf("module %s: %v", m.Name, err)
+			}
+			// the provider's words are written with braces, as every template but a workflow is
+			if left == "{{" {
+				if _, err := t.New("agent.words").Parse(agent.Words); err != nil {
+					return nil, fmt.Errorf("the words of %s: %v", p.Provider().Title(), err)
+				}
+				if _, err := t.New("agent.instructions").Parse(agent.Instructions); err != nil {
+					return nil, err
+				}
 			}
 			blocks := p.Blocks[repoPath]
 			used[repoPath] = true

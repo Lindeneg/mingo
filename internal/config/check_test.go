@@ -164,7 +164,7 @@ func TestAModuleTheKitLacksOrHasAlwaysOnAndALeadNamedLikeOneOfItsSkillsAreRefuse
 	})
 	for _, lead := range [][]string{{`lead = "spend"`}, {}} {
 		addProject(t, "wrong", append(lead, `[[roles]]`, `name = "spend"`, `[[roles]]`, `name = "dev"`)...)
-		if _, err := Load("wrong"); err == nil || !strings.HasSuffix(err.Error(), "has the lead spend, whose skill would take .claude/skills/spend, the folder of the kit's own spend skill, make another role the lead or rename this one") {
+		if _, err := Load("wrong"); err == nil || !strings.HasSuffix(err.Error(), "has the lead spend, whose skill would take .test/skills/spend, the folder of the kit's own spend skill, make another role the lead or rename this one") {
 			t.Fatal(err)
 		}
 	}

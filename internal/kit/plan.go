@@ -1,6 +1,11 @@
 package kit
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/Lindeneg/mingo/internal/provider"
+)
 
 type Action string
 
@@ -23,16 +28,15 @@ type Step struct {
 	Own    bool
 }
 
-const Instructions = "CLAUDE.md"
-
-// CLAUDE.md is the project's own file, so mingo only adds the imports and the lines its modules need to it
-func mingoLines(mods []Module) ([]string, map[string]string) {
+// the instructions file is the project's own, so mingo only adds the imports and the lines its modules need to it
+func mingoLines(agent provider.Kit, mods []Module) ([]string, map[string]string) {
 	var wanted []string
 	module := map[string]string{}
 	for _, m := range mods {
 		for _, imp := range m.Imports {
-			wanted = append(wanted, "@"+imp)
-			module["@"+imp] = m.Name
+			line := fmt.Sprintf(agent.Import, imp)
+			wanted = append(wanted, line)
+			module[line] = m.Name
 		}
 		for _, line := range m.Lines {
 			wanted = append(wanted, line)
@@ -42,12 +46,12 @@ func mingoLines(mods []Module) ([]string, map[string]string) {
 	return wanted, module
 }
 
-func PlanImports(mods []Module, read func(path string) ([]byte, bool)) []Step {
-	wanted, module := mingoLines(mods)
+func PlanImports(agent provider.Kit, mods []Module, read func(path string) ([]byte, bool)) []Step {
+	wanted, module := mingoLines(agent, mods)
 	if len(wanted) == 0 {
 		return nil
 	}
-	old, ok := read(Instructions)
+	old, ok := read(agent.Instructions)
 	text := string(old)
 	var missing []string
 	by := ""
@@ -57,7 +61,7 @@ func PlanImports(mods []Module, read func(path string) ([]byte, bool)) []Step {
 			by = module[line]
 		}
 	}
-	step := Step{File: File{Path: Instructions, Module: by, Text: text}, Action: Same, Old: old, Owned: true, What: "mingo's lines"}
+	step := Step{File: File{Path: agent.Instructions, Module: by, Text: text}, Action: Same, Old: old, Owned: true, What: "mingo's lines"}
 	if len(missing) == 0 {
 		return []Step{step}
 	}

@@ -46,8 +46,6 @@ func wantedLabels(d Deps) []label {
 
 const CIUnavailable = "ci-unavailable"
 
-const ReviewSecret = "CLAUDE_CODE_OAUTH_TOKEN"
-
 func (d Deps) repo() (string, error) {
 	if d.Project.Repo == "" {
 		return "", fmt.Errorf("%s names no repo", d.Project.Name)
@@ -245,7 +243,7 @@ func init() {
 	}
 	checks["linear"] = func(d Deps, r *report) {
 		if d.Project.Tracker.Kind == "linear" {
-			r.findings = append(r.findings, finding{text: "the Linear connector on the Claude account the sessions use, at claude.ai under Settings, Connectors", owner: true})
+			r.findings = append(r.findings, finding{text: "the Linear connector " + d.Project.Provider().Kit().Connectors, owner: true})
 			r.findings = append(r.findings, finding{text: fmt.Sprintf("the Linear team %s, made in Linear with exactly that identifier, since the connector cannot make a team", d.Project.Tracker.Team), owner: true})
 		}
 	}
@@ -255,22 +253,26 @@ func init() {
 			r.add(false, "%v", err)
 			return
 		}
-		what := fmt.Sprintf("the review's token, the secret %s on %s", ReviewSecret, repo)
+		review := d.Project.Provider().Kit().Review
+		what := fmt.Sprintf("the review's token, the secret %s on %s", review.Secret, repo)
 		have, err := d.names("secret", "list", "-R", repo, "--json", "name")
 		if err != nil {
 			r.unchecked(what, err)
 			return
 		}
-		r.add(contains(have, ReviewSecret), "%s", what)
+		if contains(have, review.Secret) {
+			r.add(true, "%s", what)
+		} else {
+			r.miss("only you can: "+review.Token+", then mingo secret review %s", "%s", what)
+		}
 	}
 }
 
 var fixes = map[string]string{
-	"labels":       "mingo apply %s",
-	"review-token": "only you can: claude setup-token, then mingo secret review %s",
-	"clones":       "mingo setup %s",
-	"memory":       "mingo setup %s",
-	"guards":       "mingo install",
+	"labels": "mingo apply %s",
+	"clones": "mingo setup %s",
+	"memory": "mingo setup %s",
+	"guards": "mingo install",
 }
 
 // returns how many things are missing, and an error when a check could not find out
@@ -358,7 +360,7 @@ func Doctor(d Deps) (int, error) {
 				continue
 			}
 			fmt.Fprintf(d.Out, "  Claude's files in %s's clone\n", role)
-			unexcluded, _, err := c.unexcluded(mods)
+			unexcluded, _, err := c.unexcluded(p.Provider().Kit(), mods)
 			if err != nil {
 				return 0, err
 			}
@@ -372,7 +374,7 @@ func Doctor(d Deps) (int, error) {
 			if err != nil {
 				return 0, err
 			}
-			steps, err := planClaude(local, c.read, lock)
+			steps, err := planClaude(p.Provider(), local, c.read, lock)
 			if err != nil {
 				return 0, fmt.Errorf("in %s's clone, %v", role, err)
 			}
@@ -430,17 +432,18 @@ func (d Deps) report(steps []Step) int {
 	return missing
 }
 
-// sets the review's token on the project's repository from what claude setup-token printed
+// sets the review's token on the project's repository from what the provider's token command printed
 func SetReviewSecret(d Deps, token string) error {
 	repo, err := d.repo()
 	if err != nil {
 		return err
 	}
+	review := d.Project.Provider().Kit().Review
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return errors.New("no token given, paste what claude setup-token printed")
+		return fmt.Errorf("no token given, paste what %s printed", review.Token)
 	}
-	r, err := d.Run(team.Options{Dir: d.TempRoot, Timeout: ghTimeout, Stdin: token}, "gh", "secret", "set", ReviewSecret, "-R", repo)
+	r, err := d.Run(team.Options{Dir: d.TempRoot, Timeout: ghTimeout, Stdin: token}, "gh", "secret", "set", review.Secret, "-R", repo)
 	if err != nil {
 		return err
 	}

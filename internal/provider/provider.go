@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/Lindeneg/mingo/internal/ojson"
 )
 
 // the provider of a project that names none
@@ -43,6 +45,47 @@ type Provider interface {
 	MemoryDir(home, clone string) string
 	// the file in the memory folder the CLI reads first, which mingo points at the handoff, empty for none
 	MemoryIndex() string
+	// what the kit writes for the CLI into a project
+	Kit() Kit
+}
+
+type Kit struct {
+	// the file at the root of a clone the CLI reads first
+	Instructions string
+	// the line in the instructions file that brings in another file, %s standing for its path
+	Import string
+	// the folder of the CLI's own files in a clone
+	Dir string
+	// the folder the CLI reads skills from
+	Skills string
+	// the commit footers and trailers mingo pr merge refuses unless a project sets its own
+	Footers  []string
+	Trailers []string
+	// where a connector such as Linear's is added for the sessions
+	Connectors string
+	// the texts the kit's templates take from the CLI, as text/template definitions named agent.<name>
+	Words string
+	// the templates the CLI gives a module, by module and then by path
+	Files map[string]map[string]string
+	// the review on GitHub, empty for a CLI without one
+	Review Review
+}
+
+type Review struct {
+	// the repository secret its token is kept in
+	Secret string
+	// the login its comments come from
+	Bot string
+	// the command that prints a token
+	Token string
+}
+
+// a CLI with a setting in the clone that turns attribution off
+type Attribution interface {
+	// the settings file in the clone
+	AttributionFile() string
+	// turns attribution off in the settings, and says whether it was off already
+	AttributionOff(settings *ojson.Object) bool
 }
 
 // a CLI that says who it is logged in as, the text written to out, and an error when it is not logged in

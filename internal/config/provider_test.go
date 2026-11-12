@@ -26,3 +26,8 @@ func (testProvider) MemoryIndex() string              { return "" }
 func (testProvider) MemoryDir(home, clone string) string {
 	return filepath.Join(home, "memory", filepath.Base(clone))
 }
+
+func (testProvider) Kit() provider.Kit {
+	return provider.Kit{Instructions: "AGENTS.md", Import: "Read %s.", Dir: ".test", Skills: ".test/skills",
+		Footers: []string{`^\s*Made with the test CLI`}, Trailers: []string{"Co-Authored-By"}}
+}

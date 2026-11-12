@@ -1,4 +1,5 @@
-does = "the Claude review of every pull request in .github/workflows/review.yml, with its token"
+does = "the AI review of every pull request in .github/workflows/review.yml, with its token"
+agent = true
 checks = ["review-token"]
 
 [[asks]]

@@ -304,7 +304,7 @@ func TestTwoFilesThatRenderToOnePathAreRefusedNamingBoth(t *testing.T) {
 	p := project(t, "modules = [\"workflow\"]\nlead = \"task-flow\"\n[[roles]]\nname = \"task-flow\"\n")
 	mods, _ := k.For(p)
 	_, err = k.Render(p, mods)
-	if err == nil || !strings.HasSuffix(err.Error(), ": workflow/.claude/skills/task-flow/SKILL.md and workflow/.claude/skills/{{.Lead}}/SKILL.md both render .claude/skills/task-flow/SKILL.md, so a role is named like one of the kit's files, rename it") {
+	if err == nil || !strings.HasSuffix(err.Error(), ": workflow/skills/task-flow/SKILL.md and workflow/skills/{{.Lead}}/SKILL.md both render .claude/skills/task-flow/SKILL.md, so a role is named like one of the kit's files, rename it") {
 		t.Fatal(err)
 	}
 }

@@ -456,7 +456,8 @@ func defaultText(def string) string {
 	case "{offset}":
 		return "10, 20 and on in role order unless set"
 	case "{read}":
-		return config.DefaultRead("repo") + ", or " + config.DefaultRead("local") + " when Claude's files are local, unless set"
+		prov := config.DefaultProvider()
+		return config.DefaultRead(prov, "repo") + ", or " + config.DefaultRead(prov, "local") + " when Claude's files are local, unless set"
 	}
 	return def + " unless set"
 }
