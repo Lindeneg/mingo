@@ -15,6 +15,7 @@ import (
 
 	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/provider"
+	"github.com/Lindeneg/mingo/internal/remote"
 )
 
 func BinPath(home string) string {
@@ -133,13 +134,26 @@ func LinkTarget(path string) (string, error) {
 }
 
 func Run(out io.Writer) error {
+	home := config.Home()
+	hosts, err := remote.Load()
+	if err != nil {
+		return err
+	}
+	// tmux and the agent CLIs run on the hosts, and this computer only reaches them
+	if remote.OnlySSH(hosts) {
+		if err := Bin(home, out); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "every host in %s is reached over ssh, so this machine needs the command alone\n", remote.File())
+		fmt.Fprintln(out, "mingo help lists the commands")
+		return nil
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		if runtime.GOOS == "darwin" {
 			return errors.New("tmux is missing, brew install tmux")
 		}
 		return errors.New("tmux is missing, see provision/provision.sh")
 	}
-	home := config.Home()
 	for _, step := range []func(string, io.Writer) error{Bin, TmuxConf} {
 		if err := step(home, out); err != nil {
 			return err

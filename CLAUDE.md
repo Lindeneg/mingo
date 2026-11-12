@@ -14,6 +14,7 @@ mingo runs agent sessions, through a provider for each agent CLI with Claude Cod
 | `internal/heavy` | the shared slots for heavy commands |
 | `internal/guard` | the decisions of the write and kill guards an agent CLI runs as hooks |
 | `internal/install` | `mingo install` |
+| `internal/remote` | the hosts mingo drives from the owner's computer, and mingo's install and calls on each over ssh |
 | `internal/provider` | what mingo needs of the agent CLI a project's sessions run, and the providers by name |
 | `internal/provider/claude` | Claude Code as a provider: its sessions, memory, settings, folder trust, hooks, review workflow and the words the kit's templates take from it |
 | `internal/kit` | rendering, the lock, `mingo apply`, `mingo doctor` and `mingo new` |
