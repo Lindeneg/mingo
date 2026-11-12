@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider/claude"
 )
 
 type writeCase struct {
@@ -21,7 +21,8 @@ func newWriteCase(t *testing.T) writeCase {
 	home := filepath.Join(root, "home")
 	project := filepath.Join(home, "dev", "demo", "lead")
 	return writeCase{
-		env:     WriteEnv{ProjectDir: project, TempDir: filepath.Join(root, "tmp"), Home: home, StateDir: filepath.Join(root, "tmp", "mingo")},
+		env: WriteEnv{ProjectDir: project, TempDir: filepath.Join(root, "tmp"), Home: home, StateDir: filepath.Join(root, "tmp", "mingo"),
+			ProjectVar: claude.Claude{}.ProjectVar(), Dirs: claude.Claude{}.WriteDirs, DirsShown: claude.Claude{}.WriteDirsShown()},
 		project: project,
 	}
 }
@@ -32,16 +33,21 @@ func (c writeCase) write(t *testing.T, path, cwd string) string {
 		cwd = c.project
 	}
 	in, _ := json.Marshal(map[string]any{"tool_name": "Write", "cwd": cwd, "tool_input": map[string]any{"file_path": path}})
-	return Write(in, c.env)
+	return c.hook(in)
 }
 
-func denied(t *testing.T, out string) bool {
-	t.Helper()
-	var d decision
-	if json.Unmarshal([]byte(out), &d) != nil {
-		return false
+// the reason Claude Code's hook input is denied for, as mingo guard claude write reads it
+func (c writeCase) hook(in []byte) string {
+	call, ok := claude.Claude{}.WriteCall(in)
+	if !ok {
+		return ""
 	}
-	return d.HookSpecificOutput.PermissionDecision == "deny" && d.HookSpecificOutput.HookEventName == "PreToolUse"
+	return Write(call, c.env)
+}
+
+func denied(t *testing.T, reason string) bool {
+	t.Helper()
+	return reason != ""
 }
 
 func TestWriteAllowsInsideTheProject(t *testing.T) {
@@ -55,7 +61,7 @@ func TestWriteAllowsTempMemoryAndPlans(t *testing.T) {
 	c := newWriteCase(t)
 	for _, path := range []string{
 		c.env.TempDir + "/claude-1000/scratch/notes.md",
-		c.env.Home + "/.claude/projects/" + config.Slug(c.project) + "/memory/handoff.md",
+		c.env.Home + "/.claude/projects/" + claude.Slug(c.project) + "/memory/handoff.md",
 		c.env.Home + "/.claude/plans/plan.md",
 	} {
 		if out := c.write(t, path, ""); out != "" {
@@ -117,7 +123,7 @@ func TestWriteReadsRelativePathAgainstCwd(t *testing.T) {
 func TestWriteChecksANotebookPath(t *testing.T) {
 	c := newWriteCase(t)
 	in, _ := json.Marshal(map[string]any{"tool_input": map[string]any{"notebook_path": c.env.Home + "/elsewhere.ipynb"}})
-	if !denied(t, Write(in, c.env)) {
+	if !denied(t, c.hook(in)) {
 		t.Fatal("notebook allowed")
 	}
 }
@@ -133,10 +139,10 @@ func TestWriteDeniesEverythingWithoutAProject(t *testing.T) {
 
 func TestWriteAllowsUnreadableInputAndNoPath(t *testing.T) {
 	c := newWriteCase(t)
-	if out := Write([]byte("not json\n"), c.env); out != "" {
+	if out := c.hook([]byte("not json\n")); out != "" {
 		t.Fatal(out)
 	}
-	if out := Write([]byte(`{"tool_input": {}}`), c.env); out != "" {
+	if out := c.hook([]byte(`{"tool_input": {}}`)); out != "" {
 		t.Fatal(out)
 	}
 }
@@ -229,7 +235,7 @@ func TestWriteAllowsTheSystemTempFolderOnlyWhenItIsGiven(t *testing.T) {
 
 func TestWriteEnvAddsSlashTmpBesideTMPDIROnlyOnMacOS(t *testing.T) {
 	t.Setenv("TMPDIR", "/var/folders/xy/T")
-	env := WriteEnvFromOS()
+	env := WriteEnvFor(claude.Claude{})
 	want := ""
 	if runtime.GOOS == "darwin" {
 		want = "/tmp"
@@ -238,7 +244,7 @@ func TestWriteEnvAddsSlashTmpBesideTMPDIROnlyOnMacOS(t *testing.T) {
 		t.Fatalf("%+v", env)
 	}
 	t.Setenv("TMPDIR", "")
-	if env := WriteEnvFromOS(); env.TempDir != "/tmp" {
+	if env := WriteEnvFor(claude.Claude{}); env.TempDir != "/tmp" {
 		t.Fatalf("%+v", env)
 	}
 }
@@ -248,7 +254,7 @@ func TestWriteAllowsSlashTmpAndPrivateTmpOnMacOS(t *testing.T) {
 		t.Skip("macOS only")
 	}
 	c := newWriteCase(t)
-	c.env.SystemTempDir = WriteEnvFromOS().SystemTempDir
+	c.env.SystemTempDir = WriteEnvFor(claude.Claude{}).SystemTempDir
 	for _, path := range []string{"/tmp/claude-501/x/scratchpad/notes.md", "/private/tmp/claude-501/x/scratchpad/notes.md"} {
 		if out := c.write(t, path, ""); out != "" {
 			t.Fatal(path, out)
@@ -274,8 +280,8 @@ func TestWriteTakesTheProjectTheTempAndTheMemoryByTheirRealPathsToo(t *testing.T
 		filepath.Join(real, "tmp", "scratch.txt"),
 		filepath.Join(c.env.TempDir, "scratch.txt"),
 		filepath.Join(real, "src", "a.go"),
-		filepath.Join(c.env.Home, ".claude", "projects", config.Slug(real), "memory", "MEMORY.md"),
-		filepath.Join(c.env.Home, ".claude", "projects", config.Slug(c.project), "memory", "MEMORY.md"),
+		filepath.Join(c.env.Home, ".claude", "projects", claude.Slug(real), "memory", "MEMORY.md"),
+		filepath.Join(c.env.Home, ".claude", "projects", claude.Slug(c.project), "memory", "MEMORY.md"),
 	} {
 		if denied(t, c.write(t, path, "")) {
 			t.Fatal(path)

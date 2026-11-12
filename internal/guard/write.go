@@ -1,13 +1,13 @@
 package guard
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider"
 )
 
 type WriteEnv struct {
@@ -16,15 +16,22 @@ type WriteEnv struct {
 	SystemTempDir string
 	Home          string
 	StateDir      string
+	// the variable that names the project folder, for the denial when it is not set
+	ProjectVar string
+	// the folders outside the project a session may write to
+	Dirs func(home, root string) []string
+	// those folders as a denial names them
+	DirsShown string
 }
 
-func WriteEnvFromOS() WriteEnv {
+func WriteEnvFor(g provider.Guarded) WriteEnv {
 	tmp := os.Getenv("TMPDIR")
 	if tmp == "" {
 		tmp = "/tmp"
 	}
-	env := WriteEnv{ProjectDir: os.Getenv("CLAUDE_PROJECT_DIR"), TempDir: tmp, Home: config.Home(), StateDir: config.StateDir()}
-	// macOS gives each user a TMPDIR of their own, while Claude Code keeps its scratchpad in /tmp
+	env := WriteEnv{ProjectDir: os.Getenv(g.ProjectVar()), TempDir: tmp, Home: config.Home(), StateDir: config.StateDir(),
+		ProjectVar: g.ProjectVar(), Dirs: g.WriteDirs, DirsShown: g.WriteDirsShown()}
+	// macOS gives each user a TMPDIR of their own, while an agent CLI may keep its scratch files in /tmp
 	if runtime.GOOS == "darwin" {
 		env.SystemTempDir = "/tmp"
 	}
@@ -75,30 +82,25 @@ func within(file, dir string) bool {
 	return file == dir || strings.HasPrefix(file, dir+string(filepath.Separator))
 }
 
-// input it cannot read is allowed, since Claude Code owns the format
-func Write(input []byte, env WriteEnv) string {
-	var in struct {
-		Cwd       string `json:"cwd"`
-		ToolInput struct {
-			FilePath     string `json:"file_path"`
-			NotebookPath string `json:"notebook_path"`
-		} `json:"tool_input"`
+// the reason the call is denied, empty when every path it writes is allowed
+func Write(call provider.WriteCall, env WriteEnv) string {
+	for _, path := range call.Paths {
+		if reason := writeOne(path, call.Cwd, env); reason != "" {
+			return reason
+		}
 	}
-	if json.Unmarshal(input, &in) != nil {
-		return ""
-	}
-	target := in.ToolInput.FilePath
-	if target == "" {
-		target = in.ToolInput.NotebookPath
-	}
+	return ""
+}
+
+func writeOne(target, cwd string, env WriteEnv) string {
 	if target == "" {
 		return ""
 	}
 	if env.ProjectDir == "" {
-		return deny("The write guard cannot tell your project from another, CLAUDE_PROJECT_DIR is not set. Start the session from its project folder.")
+		return "The write guard cannot tell your project from another, " + env.ProjectVar + " is not set. Start the session from its project folder."
 	}
 	if !filepath.IsAbs(target) {
-		base := in.Cwd
+		base := cwd
 		if base == "" {
 			base = env.ProjectDir
 		}
@@ -109,15 +111,14 @@ func Write(input []byte, env WriteEnv) string {
 	tmp := clean(env.TempDir)
 	// the state folder sits in the temp folder, and its markers and slots are every project's
 	if env.StateDir != "" && within(file, resolve(clean(env.StateDir))) && !within(file, resolve(root)) {
-		return deny("Write only inside your own project. " + target + " is in mingo's state folder, which only mingo writes.")
+		return "Write only inside your own project. " + target + " is in mingo's state folder, which only mingo writes."
 	}
-	claudeHome := filepath.Join(env.Home, ".claude")
-	allowedDirs := []string{
-		root,
-		tmp,
-		filepath.Join(claudeHome, "projects", config.Slug(root)),
-		filepath.Join(claudeHome, "projects", config.Slug(resolve(root))),
-		filepath.Join(claudeHome, "plans"),
+	allowedDirs := []string{root, tmp}
+	if env.Dirs != nil {
+		allowedDirs = append(allowedDirs, env.Dirs(env.Home, root)...)
+		if real := resolve(root); real != root {
+			allowedDirs = append(allowedDirs, env.Dirs(env.Home, real)...)
+		}
 	}
 	if env.SystemTempDir != "" {
 		allowedDirs = append(allowedDirs, clean(env.SystemTempDir))
@@ -127,5 +128,9 @@ func Write(input []byte, env WriteEnv) string {
 			return ""
 		}
 	}
-	return deny("Write only inside your own project. " + target + " is outside " + root + ", the temp folder and this project's memory and plan folders under ~/.claude.")
+	shown := "the temp folder"
+	if env.DirsShown != "" {
+		shown += " and " + env.DirsShown
+	}
+	return "Write only inside your own project. " + target + " is outside " + root + ", " + shown + "."
 }

@@ -12,8 +12,10 @@ mingo runs Claude Code sessions for every project on one machine: a tmux session
 | `internal/host` | the tmux sessions |
 | `internal/loop` | the loop that runs a role's sessions one after another |
 | `internal/heavy` | the shared slots for heavy commands |
-| `internal/guard` | the write and kill guards Claude Code runs as hooks |
-| `internal/install` | `mingo install`, and folder trust in `~/.claude.json` |
+| `internal/guard` | the decisions of the write and kill guards an agent CLI runs as hooks |
+| `internal/install` | `mingo install` |
+| `internal/provider` | what mingo needs of the agent CLI a project's sessions run, and the providers by name |
+| `internal/provider/claude` | Claude Code as a provider: its sessions, memory, settings, folder trust and hooks |
 | `internal/kit` | rendering, the lock, `mingo apply`, `mingo doctor` and `mingo new` |
 | `internal/team` | `mingo pr merge`, `mingo pr rebase` and `mingo gate` |
 | `internal/sys` | what differs between operating systems |

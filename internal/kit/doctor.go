@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/Lindeneg/mingo/internal/config"
-	"github.com/Lindeneg/mingo/internal/install"
+	"github.com/Lindeneg/mingo/internal/provider"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -125,14 +125,19 @@ func seedMemory(d Deps) error {
 	return nil
 }
 
-// makes the role's memory folder and a MEMORY.md that points at its handoff, and puts the pointer
-// first in a MEMORY.md without it, since a session reads only the start of a long one
+// makes the role's memory folder and an index that points at its handoff, and puts the pointer first
+// in an index without it, since a session reads only the start of a long one. a CLI with no index
+// gets the folder alone
 func SeedRole(p *config.Project, role string) (string, bool, error) {
 	dir := p.MemoryDir(role)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, err
 	}
-	file := filepath.Join(dir, "MEMORY.md")
+	index := p.Provider().MemoryIndex()
+	if index == "" {
+		return dir, false, nil
+	}
+	file := filepath.Join(dir, index)
 	old, err := os.ReadFile(file)
 	if errors.Is(err, os.ErrNotExist) {
 		return file, true, os.WriteFile(file, []byte(handoffLine(role)), 0o644)
@@ -195,21 +200,26 @@ var checks = map[string]func(Deps, *report){
 	},
 	"memory": func(d Deps, r *report) {
 		p := d.Project
+		index := p.Provider().MemoryIndex()
 		for _, role := range p.RoleNames() {
-			file := filepath.Join(p.MemoryDir(role), "MEMORY.md")
-			data, err := os.ReadFile(file)
-			r.add(err == nil && pointsAtHandoff(data, role), "%s's MEMORY.md pointing at handoff-%s.md", role, role)
+			if index == "" {
+				info, err := os.Stat(p.MemoryDir(role))
+				r.add(err == nil && info.IsDir(), "%s's memory folder %s", role, p.MemoryDir(role))
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(p.MemoryDir(role), index))
+			r.add(err == nil && pointsAtHandoff(data, role), "%s's %s pointing at handoff-%s.md", role, index, role)
 		}
 	},
 	"guards": func(d Deps, r *report) {
-		file := filepath.Join(d.Home, ".claude", "settings.json")
-		data, err := os.ReadFile(file)
-		ok := false
-		if err == nil {
-			before, after, err := install.MergeSettings(data, d.Home)
-			ok = err == nil && bytes.Equal(before, after)
+		prov := d.Project.Provider()
+		i, ok := prov.(provider.Installer)
+		if !ok {
+			r.note("the write and kill guards are not available with %s, which runs no hooks", prov.Title())
+			return
 		}
-		r.add(ok, "the write and kill guards in %s", file)
+		in, text := i.Installed(d.Home)
+		r.add(in, "%s", text)
 	},
 }
 

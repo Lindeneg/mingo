@@ -308,10 +308,11 @@ command to the ones that wait.
 
   mingo heavy check -- pnpm run check:run
 `,
-	"guard": `mingo guard write|bash
+	"guard": `mingo guard <provider> write|bash
 
-The hooks Claude Code runs before a tool call, which mingo install writes into
-~/.claude/settings.json. Each reads the call on stdin and prints a denial, or nothing.
+The hooks an agent CLI runs before a tool call, which mingo install writes into the CLI's settings,
+~/.claude/settings.json for Claude Code, whose provider is claude. Each reads the call on stdin and
+prints a denial, or nothing. A hook an older mingo wrote names no provider, and is Claude Code's.
 
   write   lets Edit, Write and NotebookEdit write only inside the session's project, the temp
           folder (and /tmp on macOS) outside mingo's state folder, and its memory and plan

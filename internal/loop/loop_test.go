@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider/claude"
 )
 
 // the test binary stands in for the check of the mingo on disk
@@ -154,17 +155,17 @@ func TestCheckPrintsNothingForAConfigItTakesAndTheProblemWithTheFileForOneItRefu
 	}
 }
 
-func TestClaudeProblemSaysWhatIsMissingAndWhatToDo(t *testing.T) {
+func TestCommandProblemSaysWhatIsMissingAndWhatToDo(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	if err := claudeProblem("claude", false); err == nil || err.Error() != "claude is not on PATH, install Claude Code" {
+	if err := commandProblem(claude.Claude{}, "claude", false); err == nil || err.Error() != "claude is not on PATH, install Claude Code" {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(t.TempDir(), "claude")
-	if err := claudeProblem(missing, true); err == nil || err.Error() != `MINGO_CLAUDE is "`+missing+`", which cannot be run: no such file or directory` {
+	if err := commandProblem(claude.Claude{}, missing, true); err == nil || err.Error() != `MINGO_CLAUDE is "`+missing+`", which cannot be run: no such file or directory` {
 		t.Fatal(err)
 	}
 	os.WriteFile(missing, []byte("#!/bin/sh\n"), 0o755)
-	if err := claudeProblem(missing, true); err != nil {
+	if err := commandProblem(claude.Claude{}, missing, true); err != nil {
 		t.Fatal(err)
 	}
 }

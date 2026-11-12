@@ -18,6 +18,8 @@ import (
 	"github.com/Lindeneg/mingo/internal/host"
 	"github.com/Lindeneg/mingo/internal/install"
 	"github.com/Lindeneg/mingo/internal/loop"
+	"github.com/Lindeneg/mingo/internal/provider"
+	_ "github.com/Lindeneg/mingo/internal/provider/claude"
 )
 
 const usage = `mingo runs Claude Code sessions for every project on this machine, one tmux session per role.
@@ -176,7 +178,7 @@ func subcommand(args []string, command string, actions ...string) error {
 // the most arguments of each command that takes no flag and leaves its arguments to this check
 var most = map[string]int{
 	"ls": 0, "agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
-	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 1,
+	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 2,
 }
 
 var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
@@ -349,7 +351,7 @@ func (e *env) dispatch(args []string) error {
 		}
 		return exitError(loop.Run(args[0], args[1]))
 	case "guard":
-		return e.guard(arg(0))
+		return e.guard(args)
 	case "help":
 		return e.help(args)
 	default:
@@ -364,15 +366,36 @@ func (e *env) heavy(args []string) error {
 	return exitError(heavy.Run(args[0], args[2:]))
 }
 
-func (e *env) guard(kind string) error {
-	input, _ := io.ReadAll(os.Stdin)
-	switch kind {
-	case "write":
-		fmt.Fprint(e.out, guard.Write(input, guard.WriteEnvFromOS()))
-	case "bash":
-		fmt.Fprint(e.out, guard.Bash(input))
+// a hook written before guards named their provider names none, and is the default provider's
+func (e *env) guard(args []string) error {
+	name, kind := provider.Default, ""
+	switch len(args) {
+	case 1:
+		kind = args[0]
+	case 2:
+		name, kind = args[0], args[1]
 	default:
 		return badUsage("", "guard")
+	}
+	prov, _ := provider.Get(name)
+	g, ok := prov.(provider.Guarded)
+	if !ok || kind != "write" && kind != "bash" {
+		return badUsage("", "guard")
+	}
+	input, _ := io.ReadAll(os.Stdin)
+	reason := ""
+	switch kind {
+	case "write":
+		if call, ok := g.WriteCall(input); ok {
+			reason = guard.Write(call, guard.WriteEnvFor(g))
+		}
+	case "bash":
+		if call, ok := g.CommandCall(input); ok {
+			reason = guard.Bash(call)
+		}
+	}
+	if reason != "" {
+		fmt.Fprint(e.out, g.Deny(reason))
 	}
 	return nil
 }

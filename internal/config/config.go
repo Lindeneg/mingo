@@ -15,14 +15,14 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/Lindeneg/mingo/internal/provider"
 )
 
 const (
 	DefaultClone  = "~/dev/{project}/{role}"
 	DefaultOpener = "Read your handoff memory, then continue."
 )
-
-var DefaultClaudeArgs = []string{"--permission-mode", "auto", "--remote-control"}
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -130,6 +130,8 @@ type Project struct {
 	Heavy       Heavy                        `toml:"heavy"`
 	Modules     []string                     `toml:"modules"`
 	Blocks      map[string]map[string]string `toml:"blocks"`
+
+	argsSet bool
 }
 
 // what the kit has that a config names, the modules and the folders of the kit's own skills
@@ -189,9 +191,7 @@ func Load(name string) (*Project, error) {
 	if !md.IsDefined("opener") {
 		p.Opener = DefaultOpener
 	}
-	if !md.IsDefined("claude_args") {
-		p.ClaudeArgs = append([]string(nil), DefaultClaudeArgs...)
-	}
+	p.argsSet = md.IsDefined("claude_args")
 	switch p.ClaudeFiles {
 	case "":
 		p.ClaudeFiles = "repo"
@@ -432,20 +432,25 @@ func (p *Project) State() string {
 	return filepath.Join(StateDir(), p.Name)
 }
 
-func Slug(path string) string {
-	var b strings.Builder
-	for _, c := range path {
-		if c < 128 && (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			b.WriteRune(c)
-		} else {
-			b.WriteByte('-')
-		}
-	}
-	return b.String()
+func (p *Project) MemoryDir(role string) string {
+	return p.Provider().MemoryDir(Home(), p.CloneDir(role))
 }
 
-func (p *Project) MemoryDir(role string) string {
-	return filepath.Join(Home(), ".claude", "projects", Slug(p.CloneDir(role)), "memory")
+// the provider of the agent CLI the project's sessions run
+func (p *Project) Provider() provider.Provider {
+	prov, ok := provider.Get(provider.Default)
+	if !ok {
+		panic("mingo has no provider " + provider.Default)
+	}
+	return prov
+}
+
+// the args a session passes, the project's own or else its provider's
+func (p *Project) Args() []string {
+	if p.argsSet {
+		return p.ClaudeArgs
+	}
+	return p.Provider().DefaultArgs()
 }
 
 func (p *Project) OpenerFor(role string) string {
