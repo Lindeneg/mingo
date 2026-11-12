@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider"
 )
 
 // long enough for the loop to end a held session itself
@@ -62,7 +62,7 @@ func (e *env) startRole(p *config.Project, role string) error {
 	}
 	key := p.EnvKey(role)
 	argv := []string{"env"}
-	for _, v := range []string{"MINGO_CONFIG", "MINGO_STATE", "MINGO_TMUX_SOCKET", "MINGO_CLAUDE", "MINGO_EXIT_GRACE",
+	for _, v := range []string{"MINGO_CONFIG", "MINGO_STATE", "MINGO_TMUX_SOCKET", p.Provider().CommandEnv(), "MINGO_EXIT_GRACE",
 		"MINGO_TERM_GRACE", "MINGO_WATCH_EVERY", "MINGO_MODEL_" + key, "MINGO_EFFORT_" + key} {
 		if value := os.Getenv(v); value != "" {
 			argv = append(argv, v+"="+value)
@@ -200,24 +200,32 @@ func rolesRun(p *config.Project) []config.Role {
 	return roles
 }
 
-func claudeCommand() string {
-	if v := os.Getenv("MINGO_CLAUDE"); v != "" {
-		return v
+// the providers of the projects given, each once, in their order
+func providersOf(projects []*config.Project) []provider.Provider {
+	var out []provider.Provider
+	seen := map[string]bool{}
+	for _, p := range projects {
+		prov := p.Provider()
+		if !seen[prov.Name()] {
+			seen[prov.Name()] = true
+			out = append(out, prov)
+		}
 	}
-	return "claude"
+	return out
 }
 
-const claudeSite = "https://code.claude.com/docs/en/setup"
-
-func (e *env) anyStopped(all []picked) bool {
+// the projects with a role that is not running
+func (e *env) stopped(all []picked) []*config.Project {
+	var out []*config.Project
 	for _, pk := range all {
 		for _, r := range pk.roles {
 			if !e.host.Has(pk.p.SessionName(r)) {
-				return true
+				out = append(out, pk.p)
+				break
 			}
 		}
 	}
-	return false
+	return out
 }
 
 func (e *env) start(args []string) error {
@@ -229,8 +237,10 @@ func (e *env) start(args []string) error {
 	if err != nil {
 		return err
 	}
-	if claude := claudeCommand(); e.anyStopped(all) && !installed(claude) {
-		return fmt.Errorf("%s is not installed, so no session can start, see %s", claude, claudeSite)
+	for _, prov := range providersOf(e.stopped(all)) {
+		if command, _ := provider.CommandOf(prov); !installed(command) {
+			return fmt.Errorf("%s is not installed, so no session can start, see %s", command, prov.Site())
+		}
 	}
 	for _, pk := range all {
 		if len(pk.roles) == 0 {
@@ -267,7 +277,7 @@ func (e *env) stop(args []string) error {
 				continue
 			}
 			touch(marker(p, r, "stop"))
-			// the loop types /exit only while a session runs, so between sessions the stop marker alone ends it
+			// the loop types the exit keys only while a session runs, so between sessions the stop marker alone ends it
 			if has(marker(p, r, "running")) {
 				touch(marker(p, r, "restart"))
 			}
@@ -327,7 +337,7 @@ func (e *env) restart(args []string) error {
 	}
 	if !force {
 		touch(marker(p, role, "restart"))
-		fmt.Fprintf(e.out, "%s: /exit within seconds ends the session where it stands, then the loop starts a fresh one\n", session)
+		fmt.Fprintf(e.out, "%s: %s within seconds ends the session where it stands, then the loop starts a fresh one\n", session, p.Provider().ExitShown())
 		return nil
 	}
 	// between sessions the keys would reach the loop itself or the next session
@@ -340,7 +350,7 @@ func (e *env) restart(args []string) error {
 	}
 	time.Sleep(2 * time.Second)
 	touch(marker(p, role, "restart"))
-	fmt.Fprintf(e.out, "%s: interrupted, /exit follows within seconds and the session's process is ended if that does not end it\n", session)
+	fmt.Fprintf(e.out, "%s: interrupted, %s follows within seconds and the session's process is ended if that does not end it\n", session, p.Provider().ExitShown())
 	return nil
 }
 
@@ -436,6 +446,7 @@ func installed(tool string) bool {
 
 func (e *env) status(names []string) error {
 	failed := false
+	var shown []*config.Project
 	for _, l := range projectsOrAll(names) {
 		if l.err != nil {
 			fmt.Fprintf(e.err, "mingo: %v\n", l.err)
@@ -443,6 +454,7 @@ func (e *env) status(names []string) error {
 			continue
 		}
 		p := l.p
+		shown = append(shown, p)
 		for _, r := range p.RoleNames() {
 			session := p.SessionName(r)
 			running := e.host.Has(session)
@@ -467,13 +479,18 @@ func (e *env) status(names []string) error {
 			}
 		}
 	}
-	if claude := claudeCommand(); !installed(claude) {
-		fmt.Fprintf(e.out, "%s: not installed on this host, see %s\n", claude, claudeSite)
-	} else {
-		cmd := exec.Command(claude, "auth", "status", "--text")
-		cmd.Stdout = e.out
-		if cmd.Run() != nil {
-			fmt.Fprintf(e.out, "%s: not logged in on this host\n", claude)
+	providers := providersOf(shown)
+	if prov, ok := provider.Get(provider.Default); ok && len(providers) == 0 {
+		providers = []provider.Provider{prov}
+	}
+	for _, prov := range providers {
+		command, _ := provider.CommandOf(prov)
+		if !installed(command) {
+			fmt.Fprintf(e.out, "%s: not installed on this host, see %s\n", command, prov.Site())
+			continue
+		}
+		if l, ok := prov.(provider.Login); ok && l.Login(command, e.out) != nil {
+			fmt.Fprintf(e.out, "%s: not logged in on this host\n", command)
 		}
 	}
 	if failed {
@@ -482,8 +499,8 @@ func (e *env) status(names []string) error {
 	return nil
 }
 
-func ageOf(startedMs int64) string {
-	seconds := time.Now().Unix() - startedMs/1000
+func ageOf(started time.Time) string {
+	seconds := time.Now().Unix() - started.Unix()
 	switch {
 	case seconds >= 3600:
 		return fmt.Sprintf("%dh%02dm", seconds/3600, seconds%3600/60)
@@ -494,46 +511,33 @@ func ageOf(startedMs int64) string {
 	}
 }
 
-type agentRow struct {
-	Name      string `json:"name"`
-	Pid       int    `json:"pid"`
-	Status    string `json:"status"`
-	StartedAt int64  `json:"startedAt"`
-}
-
-func liveAgents() []agentRow {
-	out, err := exec.Command(claudeCommand(), "agents", "--json").Output()
-	if err != nil {
-		return nil
+// the live sessions of every provider given that lists them, by session name
+func liveSessions(providers []provider.Provider) map[string]provider.Live {
+	live := map[string]provider.Live{}
+	for _, prov := range providers {
+		lister, ok := prov.(provider.Lister)
+		if !ok {
+			continue
+		}
+		command, _ := provider.CommandOf(prov)
+		for _, l := range lister.Live(command) {
+			if _, seen := live[l.Name]; !seen {
+				live[l.Name] = l
+			}
+		}
 	}
-	var rows []agentRow
-	if json.Unmarshal(out, &rows) != nil {
-		return nil
-	}
-	return rows
-}
-
-// the Remote Control id is in the session's own file, the TUI's scrollback does not keep it
-func remoteLink(pid int) string {
-	if pid <= 0 {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(config.Home(), ".claude", "sessions", strconv.Itoa(pid)+".json"))
-	if err != nil {
-		return ""
-	}
-	var s struct {
-		BridgeSessionID string `json:"bridgeSessionId"`
-	}
-	if json.Unmarshal(data, &s) != nil || s.BridgeSessionID == "" {
-		return ""
-	}
-	return "https://claude.ai/code/" + s.BridgeSessionID
+	return live
 }
 
 func (e *env) agents(names []string) error {
 	projects := projectsOrAll(names)
-	live := liveAgents()
+	var all []*config.Project
+	for _, l := range projects {
+		if l.err == nil {
+			all = append(all, l.p)
+		}
+	}
+	live := liveSessions(providersOf(all))
 	rows := [][]string{{"PROJECT", "ROLE", "STATE", "UP", "LINK"}}
 	// a nil row is a project that does not load, its error kept in failures under the row
 	failures := map[int]error{}
@@ -550,23 +554,20 @@ func (e *env) agents(names []string) error {
 				rows = append(rows, []string{p.Name, r, "stopped", "-", "-"})
 				continue
 			}
-			var row agentRow
-			for _, a := range live {
-				if a.Name == session {
-					row = a
-					break
-				}
-			}
-			state, up := row.Status, "-"
+			row := live[session]
+			state, up := row.State, "-"
 			if state == "" {
 				state = "between"
 				if has(marker(p, r, "running")) {
 					state = "starting"
 				}
-			} else if row.StartedAt > 0 {
-				up = ageOf(row.StartedAt)
+			} else if !row.Started.IsZero() {
+				up = ageOf(row.Started)
 			}
-			link := remoteLink(row.Pid)
+			link := ""
+			if lister, ok := p.Provider().(provider.Lister); ok {
+				link = lister.Link(config.Home(), row.Pid)
+			}
 			if link == "" {
 				link = "-"
 			}

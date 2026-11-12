@@ -20,6 +20,7 @@ import (
 
 	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/host"
+	"github.com/Lindeneg/mingo/internal/provider"
 	"github.com/Lindeneg/mingo/internal/sys"
 )
 
@@ -96,7 +97,7 @@ func endedWithin(done chan struct{}, d time.Duration) bool {
 	}
 }
 
-// /exit does not always end a session. a background task or a queued feedback draft makes claude
+// the exit keys do not always end a session. a background task or a queued draft can make the CLI
 // ask a question nobody answers, so the session is given the exit grace, then sigterm, then sigkill.
 // the question is never answered with keys, since enter on a draft sends it. the session is this
 // loop's own child, not yet waited for, so its pid cannot name another process
@@ -105,7 +106,7 @@ func (l *loop) endSession() {
 	if child == nil {
 		return
 	}
-	host.Tmux{Socket: os.Getenv("MINGO_TMUX_SOCKET")}.SendToPane(l.pane, "/exit", "Enter")
+	host.Tmux{Socket: os.Getenv("MINGO_TMUX_SOCKET")}.SendToPane(l.pane, l.p.Provider().ExitKeys()...)
 	if endedWithin(done, l.exitGrace) {
 		return
 	}
@@ -150,14 +151,7 @@ func (l *loop) args() []string {
 	if l.p.CanBeAway() && config.Away(l.p.Name) {
 		opener += " " + config.AwayOpener
 	}
-	args := []string{opener, "--name", l.name}
-	if m := l.p.Model(l.role); m != "" {
-		args = append(args, "--model", m)
-	}
-	if e := l.p.Effort(l.role); e != "" {
-		args = append(args, "--effort", e)
-	}
-	return append(args, l.p.ClaudeArgs...)
+	return l.p.Provider().Args(provider.Session{Opener: opener, Name: l.name, Model: l.p.Model(l.role), Effort: l.p.Effort(l.role), Args: l.p.Args()})
 }
 
 func orDefault(s string) string {
@@ -169,8 +163,8 @@ func orDefault(s string) string {
 
 // one session, its exit code, the signal the loop ended it with if any, and whether the restart
 // marker ended it
-func (l *loop) session(claude string) (int, string, bool) {
-	cmd := exec.Command(claude, l.args()...)
+func (l *loop) session(command string) (int, string, bool) {
+	cmd := exec.Command(command, l.args()...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "mingo: %v\n", err)
@@ -228,13 +222,13 @@ func configProblem(projectName string, err error) string {
 	return text
 }
 
-func claudeProblem(claude string, set bool) error {
-	_, err := exec.LookPath(claude)
+func commandProblem(prov provider.Provider, command string, set bool) error {
+	_, err := exec.LookPath(command)
 	if err == nil {
 		return nil
 	}
 	if !set {
-		return errors.New("claude is not on PATH, install Claude Code")
+		return fmt.Errorf("%s is not on PATH, install %s", command, prov.Title())
 	}
 	var e *exec.Error
 	if errors.As(err, &e) {
@@ -244,7 +238,7 @@ func claudeProblem(claude string, set bool) error {
 	if errors.As(err, &pe) {
 		err = pe.Err
 	}
-	return fmt.Errorf("MINGO_CLAUDE is %q, which cannot be run: %v", claude, err)
+	return fmt.Errorf("%s is %q, which cannot be run: %v", prov.CommandEnv(), command, err)
 }
 
 // sleeps for d, and says whether the stop marker came, which ends the sleep within a second
@@ -382,10 +376,8 @@ func Run(projectName, roleSpec string) int {
 		watchEvery: watchEvery,
 		exec:       sys.Exec,
 	}
-	claude, claudeSet := os.Getenv("MINGO_CLAUDE"), true
-	if claude == "" {
-		claude, claudeSet = "claude", false
-	}
+	prov := p.Provider()
+	command, commandSet := provider.CommandOf(prov)
 	delay := envSeconds("MINGO_LOOP_DELAY", FirstDelay)
 	os.Setenv("MINGO_PROJECT", p.Name)
 	os.Setenv("MINGO_ROLE", role)
@@ -406,8 +398,8 @@ func Run(projectName, roleSpec string) int {
 	current.Store(l)
 
 	for {
-		// a claude that cannot be found is waited for, not started and failed again and again
-		if !waitUntil(l.out, l.name, l.marker("stop"), retryEvery, func() error { return claudeProblem(claude, claudeSet) }) {
+		// a command that cannot be found is waited for, not started and failed again and again
+		if !waitUntil(l.out, l.name, l.marker("stop"), retryEvery, func() error { return commandProblem(prov, command, commandSet) }) {
 			break
 		}
 		l.say("\n[mingo] %s: fresh session at %s on %s\n", l.name, time.Now().UTC().Format("2006-01-02T15:04:05Z"), p.DescribeRun(role))
@@ -419,13 +411,13 @@ func Run(projectName, roleSpec string) int {
 			break
 		}
 		os.WriteFile(l.marker("using"), []byte(orDefault(p.Model(role))+" "+orDefault(p.Effort(role))+"\n"), 0o644)
-		code, forced, restarted := l.session(claude)
+		code, forced, restarted := l.session(command)
 		l.remove("running", "pid", "forced")
 		ran := int(time.Since(started).Seconds())
 		l.say("\n[mingo] %s: session ended with code %d after %d s\n", l.name, code, ran)
 		if forced != "" {
-			l.say("[mingo] %s: /exit had not ended it after %d s, a question nobody answered held it, so the loop ended it with %s\n",
-				l.name, int(l.exitGrace.Seconds()), forced)
+			l.say("[mingo] %s: %s had not ended it after %d s, a question nobody answered held it, so the loop ended it with %s\n",
+				l.name, prov.ExitShown(), int(l.exitGrace.Seconds()), forced)
 		}
 		if l.has("stop") {
 			break

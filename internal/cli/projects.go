@@ -12,8 +12,8 @@ import (
 
 	"github.com/Lindeneg/mingo"
 	"github.com/Lindeneg/mingo/internal/config"
-	"github.com/Lindeneg/mingo/internal/install"
 	"github.com/Lindeneg/mingo/internal/kit"
+	"github.com/Lindeneg/mingo/internal/provider"
 	"github.com/Lindeneg/mingo/internal/sys"
 )
 
@@ -125,7 +125,11 @@ func (e *env) memory(spec string) error {
 		return err
 	}
 	dir := p.MemoryDir(role)
-	for _, file := range []string{filepath.Join(dir, "handoff-"+role+".md"), filepath.Join(dir, "MEMORY.md")} {
+	files := []string{filepath.Join(dir, "handoff-"+role+".md")}
+	if index := p.Provider().MemoryIndex(); index != "" {
+		files = append(files, filepath.Join(dir, index))
+	}
+	for _, file := range files {
 		if info, err := os.Stat(file); err == nil && info.Mode().IsRegular() {
 			fmt.Fprintln(e.out, file)
 			return nil
@@ -201,12 +205,14 @@ func (e *env) setup(spec string) error {
 		if err != nil {
 			return err
 		}
-		if !install.Trusted(config.Home(), abs) {
-			if err := install.Trust(config.Home(), abs); err != nil {
-				return err
+		if t, ok := p.Provider().(provider.Truster); ok {
+			if !t.Trusted(config.Home(), abs) {
+				if err := t.Trust(config.Home(), abs); err != nil {
+					return err
+				}
 			}
+			fmt.Fprintf(e.out, "trusted: %s\n", abs)
 		}
-		fmt.Fprintf(e.out, "trusted: %s\n", abs)
 		if err := kit.Ports(p, r, e.out); err != nil {
 			return err
 		}

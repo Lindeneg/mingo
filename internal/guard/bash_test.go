@@ -3,6 +3,8 @@ package guard
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Lindeneg/mingo/internal/provider/claude"
 )
 
 func bashInput(t *testing.T, tool, command string) []byte {
@@ -14,17 +16,21 @@ func bashInput(t *testing.T, tool, command string) []byte {
 	return in
 }
 
+// the reason Claude Code's hook input is denied for, as mingo guard claude bash reads it
+func bashHook(in []byte) string {
+	call, ok := claude.Claude{}.CommandCall(in)
+	if !ok {
+		return ""
+	}
+	return Bash(call)
+}
+
 func denyReason(t *testing.T, out string) string {
 	t.Helper()
-	var d map[string]map[string]string
-	if err := json.Unmarshal([]byte(out), &d); err != nil {
-		t.Fatalf("not a decision %q %v", out, err)
+	if out == "" {
+		t.Fatal("not denied")
 	}
-	h := d["hookSpecificOutput"]
-	if h["hookEventName"] != "PreToolUse" || h["permissionDecision"] != "deny" || h["permissionDecisionReason"] == "" {
-		t.Fatalf("not a denial %q", out)
-	}
-	return h["permissionDecisionReason"]
+	return out
 }
 
 type bashCases struct {
@@ -37,7 +43,7 @@ func expectBash(t *testing.T, wantDeny bool, cases []bashCases) {
 	for _, c := range cases {
 		for _, command := range c.commands {
 			t.Run(c.tool+" "+command, func(t *testing.T) {
-				out := Bash(bashInput(t, c.tool, command))
+				out := bashHook(bashInput(t, c.tool, command))
 				if wantDeny {
 					denyReason(t, out)
 				} else if out != "" {
@@ -203,7 +209,7 @@ func TestBashAllowsUnparseableOrEmptyInput(t *testing.T) {
 	}
 	for _, in := range [][]byte{[]byte(""), []byte("{not json"), empty} {
 		t.Run(string(in), func(t *testing.T) {
-			if out := Bash(in); out != "" {
+			if out := bashHook(in); out != "" {
 				t.Fatalf("denied %s", out)
 			}
 		})
@@ -242,7 +248,7 @@ func TestBashNamesTheRuleItDeniesBy(t *testing.T) {
 		{"kill -9 -1", everyReason},
 	} {
 		t.Run(c.command, func(t *testing.T) {
-			if got := denyReason(t, Bash(bashInput(t, "Bash", c.command))); got != c.reason {
+			if got := denyReason(t, bashHook(bashInput(t, "Bash", c.command))); got != c.reason {
 				t.Fatalf("reason %q, want %q", got, c.reason)
 			}
 		})

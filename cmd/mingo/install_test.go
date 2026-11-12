@@ -82,8 +82,8 @@ func TestInstallAddsDenyRulesGuardsAndMessagingKeepingEveryOtherKey(t *testing.T
 		t.Fatal(compact(s))
 	}
 	write, bash := pre[0].(map[string]any), pre[1].(map[string]any)
-	if write["matcher"] != "Edit|Write|NotebookEdit" || write["hooks"].([]any)[0].(map[string]any)["command"] != bin+" guard write" ||
-		bash["matcher"] != "Bash|PowerShell" || bash["hooks"].([]any)[0].(map[string]any)["command"] != bin+" guard bash" {
+	if write["matcher"] != "Edit|Write|NotebookEdit" || write["hooks"].([]any)[0].(map[string]any)["command"] != bin+" guard claude write" ||
+		bash["matcher"] != "Bash|PowerShell" || bash["hooks"].([]any)[0].(map[string]any)["command"] != bin+" guard claude bash" {
 		t.Fatal(compact(pre))
 	}
 	keys := h.read(filepath.Join(h.home, ".claude", "settings.json"))
@@ -177,8 +177,8 @@ func TestInstallSaysEachKeyItChangedWithItsOldAndNewValue(t *testing.T) {
 		"  crossSessionInbound was \"hold\", now \"accept\"\n" +
 		"  isolatePeerMachines was unset, now true\n" +
 		"  permissions.deny gained \"Bash(killall *)\"\n" +
-		"  hooks.PreToolUse gained \"" + bin + " guard write\"\n" +
-		"  hooks.PreToolUse gained \"" + bin + " guard bash\"\n"
+		"  hooks.PreToolUse gained \"" + bin + " guard claude write\"\n" +
+		"  hooks.PreToolUse gained \"" + bin + " guard claude bash\"\n"
 	if r := h.mingo("install"); r.code != 0 || !strings.Contains(r.out, want) {
 		t.Fatal(r.out)
 	}
@@ -204,7 +204,7 @@ func TestTheGuardHooksRunFromAHomeWithASpaceInIt(t *testing.T) {
 		t.Fatal(err, h.read(filepath.Join(spaced, ".claude", "settings.json")))
 	}
 	command := s.Hooks.PreToolUse[1].Hooks[0].Command
-	if command != "'"+filepath.Join(spaced, ".local", "bin", "mingo")+"' guard bash" {
+	if command != "'"+filepath.Join(spaced, ".local", "bin", "mingo")+"' guard claude bash" {
 		t.Fatal(command)
 	}
 	in := `{"tool_name": "Bash", "tool_input": {"command": "pkill node"}}`
@@ -225,9 +225,10 @@ func TestInstallQuotesTheGuardsAnOlderMingoWroteUnquotedUnderAHomeWithASpace(t *
   {"matcher": "Bash", "hooks": [{"type": "command", "command": "BIN guard bash"}]}
 ]}}`, "BIN", bin))
 	r := h.runIn("", []string{"HOME=" + spaced}, h.bin, "install")
-	want := "  hooks.PreToolUse had \"" + bin + " guard write\", now \"'" + bin + "' guard write\"\n" +
-		"  hooks.PreToolUse lost \"" + bin + " guard bash\", the same guard as \"'" + bin + "' guard bash\"\n" +
-		"  hooks.PreToolUse lost \"" + bin + " guard bash\", the same guard as \"'" + bin + "' guard bash\"\n"
+	want := "  hooks.PreToolUse had \"" + bin + " guard write\", now \"'" + bin + "' guard claude write\"\n" +
+		"  hooks.PreToolUse had \"" + bin + " guard bash\", now \"'" + bin + "' guard claude bash\"\n" +
+		"  hooks.PreToolUse lost \"'" + bin + "' guard bash\", the same guard as \"'" + bin + "' guard claude bash\"\n" +
+		"  hooks.PreToolUse lost \"" + bin + " guard bash\", the same guard as \"'" + bin + "' guard claude bash\"\n"
 	if r.code != 0 || !strings.Contains(r.out, want) || strings.Contains(r.out, "gained \"'") {
 		t.Fatal(r.out)
 	}
@@ -244,11 +245,30 @@ func TestInstallQuotesTheGuardsAnOlderMingoWroteUnquotedUnderAHomeWithASpace(t *
 		t.Fatal(err, h.read(file))
 	}
 	for i, guard := range []string{"write", "bash"} {
-		if hooks := s.Hooks.PreToolUse[i].Hooks; len(hooks) != 1 || hooks[0].Command != "'"+bin+"' guard "+guard {
+		if hooks := s.Hooks.PreToolUse[i].Hooks; len(hooks) != 1 || hooks[0].Command != "'"+bin+"' guard claude "+guard {
 			t.Fatal(h.read(file))
 		}
 	}
 	if r := h.runIn("", []string{"HOME=" + spaced}, h.bin, "install"); !strings.Contains(r.out, "claude settings: "+file+" unchanged\n") {
+		t.Fatal(r.out)
+	}
+}
+
+func TestInstallNamesTheProviderInTheGuardsAnOlderMingoWrote(t *testing.T) {
+	h := newHome(t)
+	bin := filepath.Join(h.home, ".local", "bin", "mingo")
+	file := filepath.Join(h.home, ".claude", "settings.json")
+	h.write(file, strings.ReplaceAll(`{"hooks": {"PreToolUse": [
+  {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "BIN guard write", "timeout": 10}]},
+  {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "BIN guard bash"}]}
+]}}`, "BIN", bin))
+	r := h.mingo("install")
+	want := "  hooks.PreToolUse had \"" + bin + " guard write\", now \"" + bin + " guard claude write\"\n" +
+		"  hooks.PreToolUse had \"" + bin + " guard bash\", now \"" + bin + " guard claude bash\"\n"
+	if r.code != 0 || !strings.Contains(r.out, want) || strings.Contains(r.out, "PreToolUse gained") {
+		t.Fatal(r.out)
+	}
+	if r := h.mingo("install"); !strings.Contains(r.out, "claude settings: "+file+" unchanged\n") {
 		t.Fatal(r.out)
 	}
 }
@@ -483,18 +503,24 @@ func TestEveryCommandInTheListHasAPage(t *testing.T) {
 func TestGuardCommandsAnswerTheHook(t *testing.T) {
 	h := newHome(t)
 	project := filepath.Join(h.home, "dev", "demo", "lead")
-	in := `{"tool_name": "Write", "tool_input": {"file_path": "` + h.home + `/.bashrc"}}`
-	r := h.runIn("", []string{"CLAUDE_PROJECT_DIR=" + project, "TMPDIR=" + filepath.Join(h.root, "tmp")}, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard write", "_", in, h.bin)
-	if r.code != 0 || !strings.Contains(r.out, `"permissionDecision":"deny"`) {
+	write := `{"tool_name": "Write", "tool_input": {"file_path": "` + h.home + `/.bashrc"}}`
+	kill := `{"tool_name": "Bash", "tool_input": {"command": "pkill node"}}`
+	// a hook an older mingo wrote names no provider, and is Claude Code's
+	for _, provider := range []string{"claude ", ""} {
+		r := h.runIn("", []string{"CLAUDE_PROJECT_DIR=" + project, "TMPDIR=" + filepath.Join(h.root, "tmp")}, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard "+provider+"write", "_", write, h.bin)
+		if r.code != 0 || !strings.Contains(r.out, `"permissionDecision":"deny"`) {
+			t.Fatal(provider, r.out)
+		}
+		r = h.runIn("", nil, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard "+provider+"bash", "_", kill, h.bin)
+		if r.code != 0 || !strings.Contains(r.out, "Never end a process by its name") {
+			t.Fatal(provider, r.out)
+		}
+	}
+	in := `{"tool_name": "Bash", "tool_input": {"command": "kill 1234"}}`
+	if r := h.runIn("", nil, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard claude bash", "_", in, h.bin); r.code != 0 || r.out != "" {
 		t.Fatal(r.out)
 	}
-	in = `{"tool_name": "Bash", "tool_input": {"command": "pkill node"}}`
-	r = h.runIn("", nil, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard bash", "_", in, h.bin)
-	if r.code != 0 || !strings.Contains(r.out, "Never end a process by its name") {
-		t.Fatal(r.out)
-	}
-	in = `{"tool_name": "Bash", "tool_input": {"command": "kill 1234"}}`
-	if r = h.runIn("", nil, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard bash", "_", in, h.bin); r.code != 0 || r.out != "" {
-		t.Fatal(r.out)
+	if r := h.runIn("", nil, "bash", "-c", "printf '%s' \"$1\" | \"$2\" guard nobody bash", "_", in, h.bin); r.code != 2 {
+		t.Fatal(r.code, r.out)
 	}
 }

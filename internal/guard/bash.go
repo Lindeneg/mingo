@@ -1,11 +1,12 @@
 package guard
 
 import (
-	"encoding/json"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/Lindeneg/mingo/internal/provider"
 )
 
 const (
@@ -159,25 +160,16 @@ var (
 	shellValueFlagRe   = regexp.MustCompile(`^-(executionpolicy|ex|workingdirectory|wd|inputformat|outputformat|version|v|psconsolefile|configurationname|file|f)$`)
 )
 
-func Bash(input []byte) string {
-	var in, toolInput map[string]json.RawMessage
-	if json.Unmarshal(input, &in) != nil {
+// the reason the command is denied, empty when it ends no process by its name
+func Bash(call provider.CommandCall) string {
+	if call.Command == "" {
 		return ""
 	}
-	json.Unmarshal(in["tool_input"], &toolInput)
-	var command, toolName string
-	if json.Unmarshal(toolInput["command"], &command) != nil || command == "" {
-		return ""
-	}
-	json.Unmarshal(in["tool_name"], &toolName)
 	d := bashDialect
-	if toolName == "PowerShell" {
+	if call.PowerShell {
 		d = powershellDialect
 	}
-	if reason := check(command, d, 0); reason != "" {
-		return deny(reason)
-	}
-	return ""
+	return check(call.Command, d, 0)
 }
 
 func check(source string, d dialect, depth int) string {

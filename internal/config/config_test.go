@@ -67,7 +67,7 @@ func TestDefaultsForEverythingButRoles(t *testing.T) {
 	if got := p.OpenerFor("main"); got != "Read your handoff memory, then continue." {
 		t.Fatal(got)
 	}
-	if got := strings.Join(p.ClaudeArgs, " "); got != "--permission-mode auto --remote-control" {
+	if got := strings.Join(p.Args(), " "); got != "--test default" {
 		t.Fatal(got)
 	}
 	if p.Model("main") != "" || p.Effort("main") != "" {
@@ -95,7 +95,7 @@ func TestProjectNamesClonesOpenerModelsEfforts(t *testing.T) {
 	if got := p.SessionName("senior"); got != "acme-senior" {
 		t.Fatal(got)
 	}
-	want := home + "/.claude/projects/" + Slug(home) + "-dev-acme-tech-lead/memory"
+	want := home + "/memory/tech-lead"
 	if got := p.MemoryDir("tech-lead"); got != want {
 		t.Fatalf("%s, want %s", got, want)
 	}
@@ -136,12 +136,14 @@ func TestOneProjectsSettingsDoNotLeak(t *testing.T) {
 	setupHome(t)
 	addProject(t, "one", `claude_args = ["--x"]`, `[[roles]]`, `name = "a"`, `aliases = ["x"]`, `model = "m1"`)
 	addProject(t, "two", `[[roles]]`, `name = "b"`)
-	mustLoad(t, "one")
+	if one := mustLoad(t, "one"); strings.Join(one.Args(), " ") != "--x" {
+		t.Fatal(one.Args())
+	}
 	two := mustLoad(t, "two")
 	if _, err := two.Resolve("x"); err == nil {
 		t.Fatal("alias x leaked")
 	}
-	if two.Model("a") != "" || strings.Join(two.ClaudeArgs, " ") != "--permission-mode auto --remote-control" {
+	if two.Model("a") != "" || strings.Join(two.Args(), " ") != "--test default" {
 		t.Fatal("model or claude_args leaked")
 	}
 }
