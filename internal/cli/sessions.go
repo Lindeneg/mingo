@@ -601,6 +601,18 @@ func (e *env) agents(names []string) error {
 	return nil
 }
 
+// each project's name and id, which mingo on the owner's computer reads to find a project's host
+func (e *env) names() error {
+	for _, name := range config.Names() {
+		if id := config.IDOf(name); id != "" {
+			fmt.Fprintln(e.out, name, id)
+		} else {
+			fmt.Fprintln(e.out, name)
+		}
+	}
+	return nil
+}
+
 func (e *env) ls() error {
 	failed := false
 	for _, name := range config.Names() {

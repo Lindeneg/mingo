@@ -227,3 +227,46 @@ func Version(h Host) (string, error) {
 	}
 	return v, nil
 }
+
+// how a call reaches the host's mingo and what it gives back
+type Call struct {
+	Args   []string
+	TTY    bool
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+	// where an install of this version on the host says what it does, Stderr when nil
+	Notes io.Writer
+}
+
+// runs the host's mingo as this version, and when the host runs another, installs this one there and
+// runs it again. the exit code is the host's mingo's, or ssh's own 255
+func Run(h Host, version string, c Call) (int, error) {
+	code, err := run(h, version, c)
+	if err != nil || code != VersionDiffers {
+		return code, err
+	}
+	notes := c.Notes
+	if notes == nil {
+		notes = c.Stderr
+	}
+	fmt.Fprintf(notes, "mingo: installing mingo %s on the host %s\n", version, h.Name)
+	if err := Install(h, version, notes); err != nil {
+		return 1, err
+	}
+	return run(h, version, c)
+}
+
+func run(h Host, version string, c Call) (int, error) {
+	cmd := Cmd(h, Command(append([]string{"--expect", version}, c.Args...)), c.TTY)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Stdin, c.Stdout, c.Stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode(), nil
+	}
+	if err != nil {
+		return 1, fmt.Errorf("%s: %v", h.SSH, err)
+	}
+	return 0, nil
+}

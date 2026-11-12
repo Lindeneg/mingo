@@ -93,6 +93,12 @@ aliases = ["d"]
 model = "claude-sonnet-5-5"
 ```
 
+## Hosts
+
+mingo can run on your own computer and drive the sessions of other machines over ssh. Add each one with `mingo host add server you@server`, which builds your mingo's exact version there with `go install`, so the server needs Go, tmux and the agent CLI, and ssh must reach it with a key. Add your computer itself with `mingo host add mac --local` when it runs sessions too. Hosts are Linux or macOS.
+
+From then on a command goes to the host that has the project: `mingo attach shop/lead` attaches to the server's session and `mingo say shop/dev "pull master"` types there. `ls`, `agents` and `status` ask every host and put the host first on each line, and `mingo new` and `mingo project add` take `--host`. A project's config, clones and sessions live on its host, and your computer keeps only `~/.config/mingo/hosts.toml`. Each call carries your mingo's version, and a host on another one gets yours installed first, so build mingo from a commit you have pushed.
+
 ## The kit
 
 The kit is a set of modules. `mingo new` picks them by preset, and `mingo apply` lands their files through a pull request.
