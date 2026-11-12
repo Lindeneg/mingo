@@ -1,4 +1,4 @@
-// Command mingo runs agent sessions for every project on a machine, one tmux session per role.
+// Command mingo runs agent sessions for every project on a machine and on the hosts it drives over ssh, one tmux session per role.
 package main
 
 import (
