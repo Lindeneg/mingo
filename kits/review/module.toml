@@ -1,0 +1,7 @@
+does = "the Claude review of every pull request in .github/workflows/review.yml, with its token"
+checks = ["review-token"]
+
+[[asks]]
+key = "review.read"
+question = "what the AI review of each pull request reads before the diff"
+default = "{read}"

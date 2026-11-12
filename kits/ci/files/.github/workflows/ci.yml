@@ -1,0 +1,75 @@
+[[- if .CI.Stack]][[block "header" .]]# The checks of every pull request, one job per check. mingo pr merge asks each of
+# them to be green on the pull request's head.
+[[end]]name: [[yaml .Workflow.CI]]
+
+on:
+  pull_request:
+[[block "dispatch" .]]  # By hand, for a run on the base after Actions comes back from an outage.
+[[end]]  workflow_dispatch:
+
+concurrency:
+  group: [[yaml (printf "%s-${{ github.event.pull_request.number || github.ref }}" .Workflow.CI)]]
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+[[block "env" .]][[end]]
+jobs:
+[[- block "jobs" .]][[range $i, $check := .Workflow.Checks]][[if $i]]
+[[end]][[if eq $check "security"]]
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # gitleaks lists the pull request's commits through the API.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks scans the history of the pull request's commits, and semgrep
+          # needs the base commit to compare with.
+          fetch-depth: 0
+[[- if or (ne $.CI.Stack "other") $.CI.Setup]]
+      - uses: ./.github/actions/setup
+[[- end]]
+[[- if eq $.CI.Stack "go"]]
+      - name: Dependency audit
+        # Fails on a known vulnerability the code reaches.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+[[- else if eq $.CI.Stack "other"]][[if $.CI.Audit]]
+      - name: Dependency audit
+        run: [[yaml $.CI.Audit]]
+[[- end]]
+[[- else]]
+      - name: Dependency audit
+        # Fails on a known vulnerability of high or critical severity.
+        run: [[if eq $.CI.Stack "pnpm"]]pnpm audit --audit-level high[[else]]npm audit --audit-level=high[[end]]
+[[- end]]
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A repository an organization owns needs gitleaks' free license key as this secret.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          # The log and the job summary carry the findings; no comment on the pull request.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Semgrep, community rules
+        # The pinned container, the community ruleset, no metrics. On a pull request only a
+        # finding it adds fails, against its base; by hand every finding does. Actions stay
+        # on their major tags, so the rule that asks for commit SHAs is skipped.
+        env:
+          SEMGREP_BASELINE_COMMIT: ${{ github.event.pull_request.base.sha }}
+        run: docker run --rm -e SEMGREP_BASELINE_COMMIT -v "$PWD:/src" semgrep/semgrep:1.180.0 semgrep scan --config p/default --error --metrics=off --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+[[- else]]
+  [[$check]]:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+[[- if or (ne $.CI.Stack "other") $.CI.Setup]]
+      - uses: ./.github/actions/setup
+[[- end]]
+      - run: [[yaml ($.CI.Command $check)]]
+[[- end]][[end]]
+[[end]][[end]]

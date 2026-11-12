@@ -1,0 +1,2 @@
+does = "the lead merges, the roles and what each does, messaging by ListAgents name, the clear-context skill, and TEAM.md, which CLAUDE.md imports"
+imports = ["TEAM.md"]

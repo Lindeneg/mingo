@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{.Label}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>for i in $(seq 1 60); do /usr/bin/host api.anthropic.com &gt;/dev/null 2&gt;&amp;1 &amp;&amp; break; sleep 2; done
+"$1" start --autostart "$2"
+trap '"$1" stop "$2"; exit 0' TERM
+while :; do sleep 86400 &amp; wait $!; done</string>
+		<string>{{.Label}}</string>
+		<string>{{.Home}}/.local/bin/mingo</string>
+		<string>{{.Project}}</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{{.Home}}/.local/bin:/opt/homebrew/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ExitTimeOut</key>
+	<integer>150</integer>
+	<key>StandardOutPath</key>
+	<string>{{.Home}}/Library/Logs/{{.Label}}.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{.Home}}/Library/Logs/{{.Label}}.log</string>
+</dict>
+</plist>

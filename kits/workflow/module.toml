@@ -1,0 +1,20 @@
+does = "issue, branch, pull request, ready and merge with mingo pr merge, the ci-unavailable path, and the task-flow and lead skills"
+setup = ["labels"]
+checks = ["labels"]
+
+[[asks]]
+key = "workflow.base"
+question = "the base branch"
+default = "master"
+
+[[asks]]
+key = "workflow.gate"
+question = "the commands a role runs before it opens a pull request"
+list = true
+default = ""
+
+[[asks]]
+key = "workflow.tags"
+question = "the role tags a pull request description starts with, such as (lead)"
+list = true
+default = ""
