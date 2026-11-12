@@ -26,7 +26,8 @@ var pages = map[string]string{
 	"ls": `mingo ls
 
 Lists every project with its id and repository, then each role with its clone, the lead marked.
-A project whose config does not load shows its error in its place, and ls exits 1.
+A project whose config does not load shows its error in its place, and ls exits 1. ls --names
+prints each project's name and id alone, which mingo on the owner's computer reads from a host.
 `,
 	"agents": `mingo agents [project...]
 
