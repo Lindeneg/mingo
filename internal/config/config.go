@@ -282,6 +282,11 @@ func (p *Project) checkRoles() error {
 	return nil
 }
 
+// the id a project's config gives it, empty for none or a config that does not decode
+func IDOf(name string) string {
+	return readID(name)
+}
+
 func readID(name string) string {
 	var f struct {
 		ID string `toml:"id"`

@@ -185,7 +185,7 @@ func subcommand(args []string, command string, actions ...string) error {
 
 // the most arguments of each command that takes no flag and leaves its arguments to this check
 var most = map[string]int{
-	"ls": 0, "agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
+	"agents": -1, "status": -1, "attach": 1, "ro": 1, "peek": 2, "clear": 0, "path": 1, "memory": 1,
 	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 2,
 }
 
@@ -201,6 +201,8 @@ type env struct {
 	out  io.Writer
 	err  io.Writer
 	host host.Host
+	// set where a command runs on this machine for mingo on the owner's computer, which forwards nothing
+	here bool
 }
 
 func withLocalBin() {
@@ -222,7 +224,11 @@ func Main(args []string) int {
 		fmt.Fprintf(e.err, "mingo: %v\n", err)
 		return remote.VersionDiffers
 	}
-	err = e.dispatch(args)
+	return e.exitCode(e.dispatch(args))
+}
+
+// the exit code of a command's error, with what is wrong said on stderr
+func (e *env) exitCode(err error) int {
 	var code exitError
 	var bad usageError
 	switch {
@@ -275,6 +281,9 @@ func (e *env) dispatch(args []string) error {
 			return err
 		}
 	}
+	if done, err := e.forward(command, args); done {
+		return err
+	}
 	arg := func(i int) string {
 		if i < len(args) {
 			return args[i]
@@ -283,6 +292,12 @@ func (e *env) dispatch(args []string) error {
 	}
 	switch command {
 	case "ls":
+		if len(args) == 1 && args[0] == "--names" {
+			return e.names()
+		}
+		if err := takes(args, 0, "ls"); err != nil {
+			return err
+		}
 		return e.ls()
 	case "agents":
 		return e.agents(args)

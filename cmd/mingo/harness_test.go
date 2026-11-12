@@ -57,6 +57,8 @@ type home struct {
 	socket string
 	bin    string
 	extra  []string
+	// the tmux sockets of the hosts the case made, whose servers go with it
+	sockets []string
 }
 
 // set when a tool every case needs is missing, so each case says so and skips
@@ -91,17 +93,19 @@ func newHome(t *testing.T) *home {
 }
 
 func (h *home) teardown() {
-	out, _ := exec.Command("tmux", "-S", h.socket, "list-panes", "-a", "-F", "#{pane_pid}").Output()
-	for _, field := range strings.Fields(string(out)) {
-		pid, err := strconv.Atoi(field)
-		if err != nil || pid <= 1 {
-			continue
+	for _, socket := range append([]string{h.socket}, h.sockets...) {
+		out, _ := exec.Command("tmux", "-S", socket, "list-panes", "-a", "-F", "#{pane_pid}").Output()
+		for _, field := range strings.Fields(string(out)) {
+			pid, err := strconv.Atoi(field)
+			if err != nil || pid <= 1 {
+				continue
+			}
+			if group, err := syscall.Getpgid(pid); err == nil && group > 1 {
+				syscall.Kill(-group, syscall.SIGKILL)
+			}
 		}
-		if group, err := syscall.Getpgid(pid); err == nil && group > 1 {
-			syscall.Kill(-group, syscall.SIGKILL)
-		}
+		exec.Command("tmux", "-S", socket, "kill-server").Run()
 	}
-	exec.Command("tmux", "-S", h.socket, "kill-server").Run()
 	os.RemoveAll(h.root)
 }
 

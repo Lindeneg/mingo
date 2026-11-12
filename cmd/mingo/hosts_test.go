@@ -46,6 +46,7 @@ func (h *home) addHost(dest, system string, withGo bool) string {
 	for _, d := range []string{"home", "config/projects", "state"} {
 		h.mkdir(filepath.Join(dir, d))
 	}
+	h.sockets = append(h.sockets, filepath.Join(dir, "tmux.sock"))
 	tools := map[string]string{"uname": "#!/bin/sh\necho " + shellQuote(system) + "\n"}
 	if withGo {
 		tools["go"] = "#!/bin/sh\nprintf '%s\\n' \"$*\" >>" + shellQuote(filepath.Join(dir, "go-calls")) + "\n[ \"$1\" = install ] || exit 2\ncp " + shellQuote(h.bin) + " \"$GOBIN/mingo\"\n"

@@ -11,7 +11,8 @@ import (
 const targets = `
 A target is <project>/<role>. The role may be an alias and the project its id. Inside a project's
 clone, with MINGO_PROJECT set, or after mingo default <project>, the project may be left out. With
-no role, the project's lead.
+no role, the project's lead. With hosts, the command runs on the host that has the project, as mingo
+help host says.
 `
 
 // a loop runs on the config it loaded, so the commands that control one reach it without a config
@@ -25,7 +26,8 @@ var pages = map[string]string{
 	"ls": `mingo ls
 
 Lists every project with its id and repository, then each role with its clone, the lead marked.
-A project whose config does not load shows its error in its place, and ls exits 1.
+A project whose config does not load shows its error in its place, and ls exits 1. ls --names
+prints each project's name and id alone, which mingo on the owner's computer reads from a host.
 `,
 	"agents": `mingo agents [project...]
 
@@ -125,13 +127,14 @@ Prints a project's GitHub repository, as owner/name. With no project, the defaul
 Sets the default project, or prints the one set with no project named, and says so when none is
 set or the one set no longer exists. A target that leaves the project out takes MINGO_PROJECT first,
 then the project of the clone the command runs in, then the default, then the one project when there
-is only one.
+is only one. With hosts the default is this computer's own and may be a project of any host.
 `,
 	"project": `mingo project add|show|edit <name>
 
 A project's config, a TOML file in ~/.config/mingo/projects. MINGO_CONFIG moves the folder.
 
-  add    writes a config from the template, to fill in with edit
+  add    writes a config from the template, to fill in with edit, with hosts on the host --host
+         names, which may be left out with one host
   show   prints the config
   edit   opens the config in $EDITOR, or vi
 
@@ -246,6 +249,15 @@ mingo built from uncommitted changes cannot be installed, since a host builds it
 
 ls lists each host with its destination and the version of its mingo, or what kept ssh from
 asking. rm takes a host off the list and leaves mingo installed there.
+
+With hosts, a command for a project runs on the host that has it, with its output and exit code,
+and attach, ro, new, project add and edit, instructions edit and secret review get this terminal.
+A project's config, clones and sessions stay on its host. Which host has which project is kept in
+mingo's state folder and asked again when a host no longer has it, and a project name on two hosts
+is refused. ls, agents and status ask every host at once, or the hosts of the projects named, and
+put the host first on each line. new and project add take --host, which may be left out with one
+host. Each call carries this mingo's version, and a host on another one gets this one installed
+first. What runs inside a session, clear, heavy, gate, pr and guard, stays on the host.
 `,
 	"host add": "",
 	"host ls":  "",
@@ -412,7 +424,7 @@ At a terminal mingo new asks for what the flags leave out, with a list to pick f
 answers are few, checks each answer as it is given and asks again when it is wrong, then says what
 it will do and asks to continue. Until then Ctrl+C stops it with nothing written. Without a terminal
 the flags and the defaults are all it has, and a wrong or missing answer stops it before it writes
-anything.
+anything. With hosts, --host names the host the project goes on, and may be left out with one host.
 `)
 	for i, p := range kit.Presets {
 		fmt.Fprintf(&b, "\n  %-5s  %s", p, kit.PresetHints[i])
