@@ -15,7 +15,7 @@ func localWorld(t *testing.T) *world {
 	w.fsys["sessions/module.toml"] = &fstest.MapFile{Data: []byte("does = \"sessions\"\nalways = true\nsetup = [\"memory\"]\nlines = [\"No attribution.\"]\n")}
 	w.fsys["skills/module.toml"] = &fstest.MapFile{Data: []byte("does = \"skills\"\nimports = [\"TEAM.md\"]\n")}
 	w.fsys["skills/files/tools/run.sh"] = &fstest.MapFile{Data: []byte("echo {{.Lead}}\n")}
-	w.config = "repo = \"x/demo\"\nclaude_files = \"local\"\nmodules = [\"skills\"]\n[[roles]]\nname = \"chief\"\n[[roles]]\nname = \"helper\"\n"
+	w.config = "repo = \"x/demo\"\nagent_files = \"local\"\nmodules = [\"skills\"]\n[[roles]]\nname = \"chief\"\n[[roles]]\nname = \"helper\"\n"
 	git(t, w.home, "clone", "--quiet", w.origin, w.helper())
 	return w
 }
@@ -37,7 +37,7 @@ func onBranch(w *world, path string) bool {
 	return exec.Command("git", "-C", w.origin, "cat-file", "-e", Branch+":"+path).Run() == nil
 }
 
-func TestApplyWithLocalClaudeFilesPutsThemInEveryCloneOutOfGitAndTheRestInThePullRequest(t *testing.T) {
+func TestApplyWithLocalAgentFilesPutsThemInEveryCloneOutOfGitAndTheRestInThePullRequest(t *testing.T) {
 	w := localWorld(t)
 	out := w.apply()
 	for _, line := range []string{
@@ -80,7 +80,7 @@ func TestApplyWithLocalClaudeFilesPutsThemInEveryCloneOutOfGitAndTheRestInThePul
 	}
 }
 
-func TestApplyWithLocalClaudeFilesReplacesOrRemovesAClonesFileOnlyWhileItIsAsRendered(t *testing.T) {
+func TestApplyWithLocalAgentFilesReplacesOrRemovesAClonesFileOnlyWhileItIsAsRendered(t *testing.T) {
 	w := localWorld(t)
 	w.apply()
 	w.merge()
@@ -107,7 +107,7 @@ func TestApplyWithLocalClaudeFilesReplacesOrRemovesAClonesFileOnlyWhileItIsAsRen
 	}
 }
 
-func TestApplyWithLocalClaudeFilesRefusesARepositoryThatHasOneAndChangesNothing(t *testing.T) {
+func TestApplyWithLocalAgentFilesRefusesARepositoryThatHasOneAndChangesNothing(t *testing.T) {
 	w := localWorld(t)
 	w.fsys["workflow/module.toml"] = &fstest.MapFile{Data: []byte("does = \"workflow\"\nsetup = [\"labels\"]\n")}
 	w.config = strings.Replace(w.config, `modules = ["skills"]`, `modules = ["skills", "workflow"]`, 1)
@@ -117,7 +117,7 @@ func TestApplyWithLocalClaudeFilesRefusesARepositoryThatHasOneAndChangesNothing(
 	git(t, w.lead, "commit", "--quiet", "-m", "settings")
 	git(t, w.lead, "push", "--quiet", "origin", "master")
 	err := w.try()
-	if err == nil || !strings.Contains(err.Error(), "Claude's files stay out of the repository, and x/demo has .claude/settings.json, take it out first") {
+	if err == nil || !strings.Contains(err.Error(), "the agent files stay out of the repository, and x/demo has .claude/settings.json, take it out first") {
 		t.Fatal(err)
 	}
 	if exec.Command("git", "-C", w.origin, "rev-parse", "--verify", "--quiet", Branch).Run() == nil {
@@ -136,7 +136,7 @@ func TestApplyWithLocalClaudeFilesRefusesARepositoryThatHasOneAndChangesNothing(
 	}
 }
 
-func TestApplyWithLocalClaudeFilesReadsEveryCloneBeforeItPushesOrWritesAnything(t *testing.T) {
+func TestApplyWithLocalAgentFilesReadsEveryCloneBeforeItPushesOrWritesAnything(t *testing.T) {
 	w := localWorld(t)
 	os.MkdirAll(filepath.Join(w.helper(), ".claude"), 0o755)
 	os.WriteFile(filepath.Join(w.helper(), ".claude", "settings.json"), []byte("[]\n"), 0o644)
@@ -155,7 +155,7 @@ func TestApplyWithLocalClaudeFilesReadsEveryCloneBeforeItPushesOrWritesAnything(
 	}
 }
 
-func TestApplyWithLocalClaudeFilesKeepsThemOutOfGitInAWorktreeToo(t *testing.T) {
+func TestApplyWithLocalAgentFilesKeepsThemOutOfGitInAWorktreeToo(t *testing.T) {
 	w := localWorld(t)
 	os.RemoveAll(w.helper())
 	git(t, w.lead, "worktree", "add", "--quiet", "-b", "helper", w.helper())
@@ -174,7 +174,7 @@ func TestApplyWithLocalClaudeFilesKeepsThemOutOfGitInAWorktreeToo(t *testing.T) 
 	}
 }
 
-func TestApplyWithLocalClaudeFilesNeedsEveryRoleToHaveItsOwnClone(t *testing.T) {
+func TestApplyWithLocalAgentFilesNeedsEveryRoleToHaveItsOwnClone(t *testing.T) {
 	w := localWorld(t)
 	os.RemoveAll(w.helper())
 	want := "helper has none at " + w.helper() + ", run mingo setup demo first"
@@ -193,7 +193,7 @@ func TestApplyWithLocalClaudeFilesNeedsEveryRoleToHaveItsOwnClone(t *testing.T) 
 	}
 }
 
-func TestDoctorWithLocalClaudeFilesReadsEveryClone(t *testing.T) {
+func TestDoctorWithLocalAgentFilesReadsEveryClone(t *testing.T) {
 	w := localWorld(t)
 	w.apply()
 	w.merge()
@@ -207,9 +207,9 @@ func TestDoctorWithLocalClaudeFilesReadsEveryClone(t *testing.T) {
 	out := w.out.String()
 	for _, line := range []string{
 		"    in place: tools/run.sh\n",
-		"  Claude's files in chief's clone\n    in place: Claude's files out of git in .git/info/exclude\n",
+		"  the agent files in chief's clone\n    in place: the agent files out of git in .git/info/exclude\n",
 		"    in place: TEAM.md\n", "    in place: CLAUDE.md\n",
-		"  Claude's files in helper's clone\n    missing: /CLAUDE.md /TEAM.md /.claude/ in .git/info/exclude (mingo apply demo)\n",
+		"  the agent files in helper's clone\n    missing: /CLAUDE.md /TEAM.md /.claude/ in .git/info/exclude (mingo apply demo)\n",
 		"    missing: TEAM.md (mingo apply demo)\n",
 	} {
 		if !strings.Contains(out, line) {
@@ -221,7 +221,7 @@ func TestDoctorWithLocalClaudeFilesReadsEveryClone(t *testing.T) {
 	}
 }
 
-func TestApplyWithLocalClaudeFilesWritesTheProjectsOwnTextIntoEveryClonesCLAUDEmd(t *testing.T) {
+func TestApplyWithLocalAgentFilesWritesTheProjectsOwnTextIntoEveryClonesCLAUDEmd(t *testing.T) {
 	w := localWorld(t)
 	w.claude = "# demo\n\nOur rules.\n"
 	w.apply()

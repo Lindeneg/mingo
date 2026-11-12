@@ -168,7 +168,7 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 		return err
 	}
 	if !md.IsDefined("review", "read") {
-		p.Review.Read = DefaultRead(p.Provider(), p.ClaudeFiles)
+		p.Review.Read = DefaultRead(p.Provider(), p.AgentFiles)
 	}
 	if !md.IsDefined("review", "categories") {
 		p.Review.Categories = append([]string(nil), DefaultCategories...)

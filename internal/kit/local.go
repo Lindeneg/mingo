@@ -8,12 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/provider"
 )
 
 // the agent files are the instructions file, the files it imports and what is under the CLI's folder
-func claudeFile(agent provider.Kit, mods []Module, path string) bool {
+func agentFile(agent provider.Kit, mods []Module, path string) bool {
 	if path == agent.Instructions || strings.HasPrefix(path, agent.Dir+"/") {
 		return true
 	}
@@ -25,22 +24,22 @@ func claudeFile(agent provider.Kit, mods []Module, path string) bool {
 	return false
 }
 
-// the files for the repository, and with claude_files local the ones for every clone,
-// CLAUDE.md first, the project's own text with mingo's lines below it
+// the files for the repository, and with agent_files local the ones for every clone,
+// the instructions file first, the project's own text with mingo's lines below it
 func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
-	if !d.Project.ClaudeLocal() {
+	if !d.Project.AgentLocal() {
 		return files, nil, nil
 	}
 	agent := d.Project.Provider().Kit()
 	var repo, clone []File
 	for _, f := range files {
-		if claudeFile(agent, mods, f.Path) {
+		if agentFile(agent, mods, f.Path) {
 			clone = append(clone, f)
 		} else {
 			repo = append(repo, f)
 		}
 	}
-	own, err := os.ReadFile(config.ClaudeFile(d.Project.Name))
+	own, err := os.ReadFile(d.Project.InstructionsFile())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, err
 	}
@@ -65,7 +64,7 @@ func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
 }
 
 // every agent file that mingo writes into a clone
-func claudePaths(prov provider.Provider, files []File) []string {
+func agentPaths(prov provider.Provider, files []File) []string {
 	var paths []string
 	for _, f := range files {
 		paths = append(paths, f.Path)
@@ -86,7 +85,7 @@ func excludes(agent provider.Kit, mods []Module) []string {
 	return append(lines, "/"+agent.Dir+"/")
 }
 
-func planClaude(prov provider.Provider, files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
+func planAgent(prov provider.Provider, files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
 	settings, err := PlanSettings(prov, read)
 	return append(Plan(files, read, lock), settings...), err
 }
@@ -143,14 +142,14 @@ func (d Deps) clone(role string) (clone, error) {
 
 func (d Deps) clones() ([]clone, error) {
 	p := d.Project
-	if !p.ClaudeLocal() {
+	if !p.AgentLocal() {
 		return nil, nil
 	}
 	var out []clone
 	for _, role := range p.RoleNames() {
 		c, err := d.clone(role)
 		if err != nil {
-			return nil, fmt.Errorf("claude_files is local, so mingo writes Claude's files into every clone, and %v", err)
+			return nil, fmt.Errorf("agent_files is local, so mingo writes the agent files into every clone, and %v", err)
 		}
 		out = append(out, c)
 	}
@@ -162,7 +161,7 @@ func (c clone) read(path string) ([]byte, bool) {
 	return data, err == nil
 }
 
-// the lock of Claude's files is inside .git, so it is never committed either
+// the lock of the agent files is inside .git, so it is never committed either
 func (c clone) lockFile() string {
 	return filepath.Join(c.git, "mingo", "kit.lock")
 }
@@ -172,7 +171,7 @@ func (c clone) lock() (*Lock, error) {
 	return parseLock(data, c.lockFile())
 }
 
-// the lines of .git/info/exclude that Claude's files still need, and what the file has
+// the lines of .git/info/exclude that the agent files still need, and what the file has
 func (c clone) unexcluded(agent provider.Kit, mods []Module) ([]string, string, error) {
 	data, err := os.ReadFile(c.exclude)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -215,7 +214,7 @@ func (d Deps) planClones(files []File, clones []clone) ([]clonePlan, error) {
 		if err != nil {
 			return nil, err
 		}
-		steps, err := planClaude(d.Project.Provider(), files, c.read, lock)
+		steps, err := planAgent(d.Project.Provider(), files, c.read, lock)
 		if err != nil {
 			return nil, fmt.Errorf("in %s's clone, %v", c.role, err)
 		}
@@ -224,7 +223,7 @@ func (d Deps) planClones(files []File, clones []clone) ([]clonePlan, error) {
 	return plans, nil
 }
 
-// writes Claude's files into every clone, after .git/info/exclude keeps them out of git, and says whether anything changed
+// writes the agent files into every clone, after .git/info/exclude keeps them out of git, and says whether anything changed
 func (d Deps) applyClones(mods []Module, plans []clonePlan, scratch string) (bool, error) {
 	changed := false
 	for _, plan := range plans {

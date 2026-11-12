@@ -13,6 +13,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// the keys mingo reads under another name now
+var renamed = map[string]string{"claude_files": "agent_files", "claude_args": "args"}
+
 // a key mingo does not read would load as its default without a word, so every one is refused
 func (p *Project) checkKeys(md toml.MetaData) error {
 	undecoded := md.Undecoded()
@@ -26,7 +29,9 @@ func (p *Project) checkKeys(md toml.MetaData) error {
 			continue
 		}
 		hint := ""
-		if near := nearestKey(k); near != "" {
+		if now, ok := renamed[k.String()]; ok {
+			hint = ", which is " + now + " now"
+		} else if near := nearestKey(k); near != "" {
 			if t := md.Type(k...); t == "Hash" || t == "ArrayHash" {
 				near = tableOf(t, append(append(toml.Key{}, k[:len(k)-1]...), near))
 			}
@@ -37,6 +42,8 @@ func (p *Project) checkKeys(md toml.MetaData) error {
 	switch {
 	case len(keys) == 0:
 		return nil
+	case len(keys) == 1 && renamed[keys[0]] != "":
+		return fmt.Errorf("%s has the key %s, which is %s now", p.File, keys[0], renamed[keys[0]])
 	case len(keys) == 1 && hints[0] == "":
 		return fmt.Errorf("%s has the key %s, which mingo does not know, README.md names every key", p.File, keys[0])
 	case len(keys) == 1:

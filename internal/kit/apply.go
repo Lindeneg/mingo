@@ -464,14 +464,14 @@ func (d Deps) pullRequest(dir, subject string, steps []Step) error {
 }
 
 func (d Deps) plan(mods []Module, files []File, co *checkout, lock *Lock) ([]Step, error) {
-	if d.Project.ClaudeLocal() {
+	if d.Project.AgentLocal() {
 		repo, local, err := d.split(mods, files)
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range claudePaths(d.Project.Provider(), local) {
+		for _, path := range agentPaths(d.Project.Provider(), local) {
 			if _, ok := co.read(path); ok {
-				return nil, fmt.Errorf("claude_files is local, so Claude's files stay out of the repository, and %s has %s, take it out first", d.Project.Repo, path)
+				return nil, fmt.Errorf("agent_files is local, so the agent files stay out of the repository, and %s has %s, take it out first", d.Project.Repo, path)
 			}
 		}
 		scripts, err := PlanScripts(mods, d.Project, co.read)

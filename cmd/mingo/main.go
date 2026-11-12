@@ -1,4 +1,4 @@
-// Command mingo runs Claude Code sessions for every project on a machine, one tmux session per role.
+// Command mingo runs agent sessions for every project on a machine, one tmux session per role.
 package main
 
 import (

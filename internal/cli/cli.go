@@ -22,13 +22,14 @@ import (
 	_ "github.com/Lindeneg/mingo/internal/provider/claude"
 )
 
-const usage = `mingo runs Claude Code sessions for every project on this machine, one tmux session per role.
+const usage = `mingo runs agent sessions for every project on this machine, one tmux session per role, each
+running the project's agent CLI, which for now is Claude Code.
 
 A target is <project>/<role>. A role may be an alias and a project its id, and the project may be
 left out inside a project's clone, with MINGO_PROJECT set, or with a default project.
 
 Sessions
-  mingo agents [project...]             live sessions with state, uptime and Remote Control link
+  mingo agents [project...]             live sessions with state, uptime and remote link
   mingo attach <target>                 attach, detach with Ctrl+B then D
   mingo away <project>                  the owner is away, the sessions take defaults instead of asking
   mingo back <project>                  the owner is back, the sessions ask again
@@ -38,7 +39,7 @@ Sessions
   mingo ro <target>                     attach read only
   mingo say <target> <message>          type a message into a session
   mingo start [--autostart] [target...] start roles, a whole project when no role is named
-  mingo status [project...]             each role's state, model and effort, and the Claude login
+  mingo status [project...]             each role's state, model and effort, and the agent CLI's login
   mingo stop [target...]                ask sessions to exit, close what is left after a minute and a half
 
 Projects
@@ -53,10 +54,10 @@ Projects
 
 Kit
   mingo apply <project>                 land the files of the project's modules through a pull request
-  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
   mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo instructions edit <project>     a local project's instructions file, which mingo apply writes into every clone
   mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
-  mingo secret review <project>         set the review's token from what claude setup-token printed
+  mingo secret review <project>         set the review's token from what the provider's token command printed
 
 Team
   mingo gate <log>                      run the project's gate targets into a log, stopping at the first red one
@@ -66,7 +67,7 @@ Team
 
 Other
   mingo help [command]                  this list, or what a command does
-  mingo install                         the command, tmux and Claude settings
+  mingo install                         the command, tmux and the agent CLI's settings
   mingo version                         this mingo's version
 
 mingo help <command> explains a command, and so does mingo <command> --help.
@@ -181,7 +182,7 @@ var most = map[string]int{
 	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 2,
 }
 
-var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "claude": true}
+var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "instructions": true}
 
 type exitError int
 
@@ -238,6 +239,9 @@ func (e *env) dispatch(args []string) error {
 	}
 	if isHelp(command) {
 		return e.help(args)
+	}
+	if command == "claude" {
+		return badUsage("mingo claude edit is mingo instructions edit now")
 	}
 	if !known(command) {
 		return badUsage(fmt.Sprintf("unknown command %q, mingo help lists them", command))
@@ -326,11 +330,11 @@ func (e *env) dispatch(args []string) error {
 		return e.apply(arg(0))
 	case "doctor":
 		return e.doctor(arg(0))
-	case "claude":
-		if err := subcommand(args, "claude", "edit"); err != nil {
+	case "instructions":
+		if err := subcommand(args, "instructions", "edit"); err != nil {
 			return err
 		}
-		return e.claude(arg(0), arg(1))
+		return e.instructions(arg(0), arg(1))
 	case "secret":
 		if err := subcommand(args, "secret", "review"); err != nil {
 			return err

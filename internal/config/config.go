@@ -59,9 +59,10 @@ func File(name string) string {
 	return filepath.Join(Dir(), "projects", name+".toml")
 }
 
-// with claude_files local the project's CLAUDE.md is kept here, out of every repository
-func ClaudeFile(name string) string {
-	return filepath.Join(Dir(), "projects", name, "CLAUDE.md")
+// with agent_files local the project's instructions file is kept here, out of every repository,
+// named as its provider names it
+func (p *Project) InstructionsFile() string {
+	return filepath.Join(Dir(), "projects", p.Name, p.Provider().Kit().Instructions)
 }
 
 // the owner's away mode is kept beside the project's config, so it outlasts a reboot
@@ -110,26 +111,27 @@ type Role struct {
 }
 
 type Project struct {
-	Name        string                       `toml:"-"`
-	File        string                       `toml:"-"`
-	ID          string                       `toml:"id"`
-	Title       string                       `toml:"title"`
-	Repo        string                       `toml:"repo"`
-	Clone       string                       `toml:"clone"`
-	Lead        string                       `toml:"lead"`
-	Opener      string                       `toml:"opener"`
-	Autostart   []string                     `toml:"autostart"`
-	ClaudeArgs  []string                     `toml:"claude_args"`
-	ClaudeFiles string                       `toml:"claude_files"`
-	Roles       []Role                       `toml:"roles"`
-	Workflow    Workflow                     `toml:"workflow"`
-	Tracker     Tracker                      `toml:"tracker"`
-	CI          CI                           `toml:"ci"`
-	Review      Review                       `toml:"review"`
-	Ports       Ports                        `toml:"ports"`
-	Heavy       Heavy                        `toml:"heavy"`
-	Modules     []string                     `toml:"modules"`
-	Blocks      map[string]map[string]string `toml:"blocks"`
+	Name         string                       `toml:"-"`
+	File         string                       `toml:"-"`
+	ID           string                       `toml:"id"`
+	Title        string                       `toml:"title"`
+	Repo         string                       `toml:"repo"`
+	Clone        string                       `toml:"clone"`
+	Lead         string                       `toml:"lead"`
+	Opener       string                       `toml:"opener"`
+	Autostart    []string                     `toml:"autostart"`
+	ProviderName string                       `toml:"provider"`
+	AgentArgs    []string                     `toml:"args"`
+	AgentFiles   string                       `toml:"agent_files"`
+	Roles        []Role                       `toml:"roles"`
+	Workflow     Workflow                     `toml:"workflow"`
+	Tracker      Tracker                      `toml:"tracker"`
+	CI           CI                           `toml:"ci"`
+	Review       Review                       `toml:"review"`
+	Ports        Ports                        `toml:"ports"`
+	Heavy        Heavy                        `toml:"heavy"`
+	Modules      []string                     `toml:"modules"`
+	Blocks       map[string]map[string]string `toml:"blocks"`
 
 	argsSet bool
 }
@@ -191,13 +193,20 @@ func Load(name string) (*Project, error) {
 	if !md.IsDefined("opener") {
 		p.Opener = DefaultOpener
 	}
-	p.argsSet = md.IsDefined("claude_args")
-	switch p.ClaudeFiles {
+	if !md.IsDefined("provider") {
+		p.ProviderName = provider.Default
+	}
+	// a program that registers no provider, such as this package's tests, loads without the check
+	if _, ok := provider.Get(p.ProviderName); !ok && len(provider.Names()) > 0 {
+		return nil, fmt.Errorf("%s names the provider %q, mingo has %s", file, p.ProviderName, strings.Join(provider.Names(), " "))
+	}
+	p.argsSet = md.IsDefined("args")
+	switch p.AgentFiles {
 	case "":
-		p.ClaudeFiles = "repo"
+		p.AgentFiles = "repo"
 	case "repo", "local":
 	default:
-		return nil, fmt.Errorf("%s has claude_files %s, use repo or local", file, p.ClaudeFiles)
+		return nil, fmt.Errorf("%s has agent_files %s, use repo or local", file, p.AgentFiles)
 	}
 	if len(p.Roles) == 0 {
 		return nil, fmt.Errorf("%s names no roles", file)
@@ -330,14 +339,14 @@ func Known(nameOrID string) bool {
 	return ok
 }
 
-// CLAUDE.md, the files it imports and .claude live in each clone and out of git
-func (p *Project) ClaudeLocal() bool {
-	return p.ClaudeFiles == "local"
+// the instructions file, the files it imports and the CLI's folder live in each clone and out of git
+func (p *Project) AgentLocal() bool {
+	return p.AgentFiles == "local"
 }
 
 // the review on GitHub sees only what the repository has
-func DefaultRead(prov provider.Provider, claudeFiles string) string {
-	if claudeFiles == "local" {
+func DefaultRead(prov provider.Provider, agentFiles string) string {
+	if agentFiles == "local" {
 		return "README.md first"
 	}
 	return prov.Kit().Instructions + " first"
@@ -438,6 +447,9 @@ func (p *Project) MemoryDir(role string) string {
 
 // the provider of the agent CLI the project's sessions run
 func (p *Project) Provider() provider.Provider {
+	if prov, ok := provider.Get(p.ProviderName); ok {
+		return prov
+	}
 	return DefaultProvider()
 }
 
@@ -453,7 +465,7 @@ func DefaultProvider() provider.Provider {
 // the args a session passes, the project's own or else its provider's
 func (p *Project) Args() []string {
 	if p.argsSet {
-		return p.ClaudeArgs
+		return p.AgentArgs
 	}
 	return p.Provider().DefaultArgs()
 }

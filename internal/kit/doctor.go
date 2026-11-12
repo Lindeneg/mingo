@@ -333,7 +333,7 @@ func Doctor(d Deps) (int, error) {
 	}
 	missing += d.report(steps)
 	rendered := files
-	if p.ClaudeLocal() {
+	if p.AgentLocal() {
 		repo, local, err := d.split(mods, files)
 		if err != nil {
 			return 0, err
@@ -349,7 +349,7 @@ func Doctor(d Deps) (int, error) {
 		}
 		missing += len(open)
 	}
-	if p.ClaudeLocal() {
+	if p.AgentLocal() {
 		_, local, err := d.split(mods, files)
 		if err != nil {
 			return 0, err
@@ -359,13 +359,13 @@ func Doctor(d Deps) (int, error) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(d.Out, "  Claude's files in %s's clone\n", role)
+			fmt.Fprintf(d.Out, "  the agent files in %s's clone\n", role)
 			unexcluded, _, err := c.unexcluded(p.Provider().Kit(), mods)
 			if err != nil {
 				return 0, err
 			}
 			if len(unexcluded) == 0 {
-				fmt.Fprintln(d.Out, "    in place: Claude's files out of git in .git/info/exclude")
+				fmt.Fprintln(d.Out, "    in place: the agent files out of git in .git/info/exclude")
 			} else {
 				fmt.Fprintf(d.Out, "    missing: %s in .git/info/exclude (mingo apply %s)\n", strings.Join(unexcluded, " "), p.Name)
 				missing++
@@ -374,7 +374,7 @@ func Doctor(d Deps) (int, error) {
 			if err != nil {
 				return 0, err
 			}
-			steps, err := planClaude(p.Provider(), local, c.read, lock)
+			steps, err := planAgent(p.Provider(), local, c.read, lock)
 			if err != nil {
 				return 0, fmt.Errorf("in %s's clone, %v", role, err)
 			}

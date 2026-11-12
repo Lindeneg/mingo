@@ -139,7 +139,7 @@ func (a *answers) fill(text string, item string, index int) string {
 		"{name}", a.values["name"],
 		"{title}", a.values["title"],
 		"{offset}", strconv.Itoa((index+1)*10),
-		"{read}", config.DefaultRead(config.DefaultProvider(), a.values["claude_files"]),
+		"{read}", config.DefaultRead(providerOf(a.values["provider"]), a.values["agent_files"]),
 		"{first role}", first,
 	).Replace(text)
 }
@@ -213,7 +213,27 @@ type newRun struct {
 
 // the provider of the project being made
 func (r *newRun) provider() provider.Provider {
+	return providerOf(r.a.values["provider"])
+}
+
+func providerOf(name string) provider.Provider {
+	if p, ok := provider.Get(name); ok {
+		return p
+	}
 	return config.DefaultProvider()
+}
+
+// the providers mingo has, which the question of the provider offers
+func withProviders(ask Ask) Ask {
+	if ask.Key != "provider" {
+		return ask
+	}
+	ask.Choices = nil
+	for _, name := range provider.Names() {
+		p, _ := provider.Get(name)
+		ask.Choices = append(ask.Choices, Choice{Value: name, Hint: p.Title()})
+	}
+	return ask
 }
 
 // the flags as they were given, trimmed, each named once unless it is per check or per role
@@ -320,7 +340,7 @@ func (k *Kit) New(name string, flags map[string][]string, d NewDeps) (Made, erro
 	}
 	for _, m := range k.Modules {
 		for _, ask := range m.Asks {
-			r.byFlag[ask.Flag()], r.owner[ask.Flag()] = ask, m
+			r.byFlag[ask.Flag()], r.owner[ask.Flag()] = withProviders(ask), m
 		}
 	}
 	if err := r.readFlags(flags); err != nil {
@@ -338,7 +358,9 @@ func (k *Kit) New(name string, flags map[string][]string, d NewDeps) (Made, erro
 	for _, always := range []bool{true, false} {
 		for _, m := range k.Modules {
 			if m.Always == always && (always || contains(r.modules, m.Name)) {
-				asks = append(asks, m.Asks...)
+				for _, ask := range m.Asks {
+					asks = append(asks, withProviders(ask))
+				}
 			}
 		}
 	}
@@ -367,7 +389,7 @@ func (k *Kit) New(name string, flags map[string][]string, d NewDeps) (Made, erro
 	}
 	return Made{
 		TOML: text, Name: name, Repo: r.a.values["repo"], Roles: r.a.list("roles"), Modules: r.modules,
-		Local: r.a.values["claude_files"] == "local",
+		Local: r.a.values["agent_files"] == "local",
 	}, nil
 }
 
@@ -428,6 +450,11 @@ func (r *newRun) ask(ask Ask) error {
 			key, _ := gate(ask)
 			return r.notFor(ask, r.a.values[key])
 		}
+		return nil
+	}
+	// with one provider there is nothing to choose
+	if names := provider.Names(); ask.Key == "provider" && len(names) == 1 && !r.given(ask.Flag()) {
+		r.a.values[ask.Key] = names[0]
 		return nil
 	}
 	if ask.Key == "heavy.scripts" {
@@ -766,7 +793,7 @@ func (m Made) Next(file string) string {
 	}
 	fmt.Fprintf(&b, "  open a pull request on %s with the kit's files\n", m.Repo)
 	if m.Local {
-		b.WriteString("  write Claude's files into each clone, out of git\n")
+		b.WriteString("  write the agent files into each clone, out of git\n")
 	}
 	return b.String()
 }
@@ -821,8 +848,11 @@ func (a *answers) toml(name, preset string, modules []string) (string, error) {
 		fmt.Fprintf(&b, "title = %s\n", tomlString(t))
 	}
 	fmt.Fprintf(&b, "lead = %s\n", tomlString(a.values["lead"]))
-	if v := a.values["claude_files"]; v != "" && v != "repo" {
-		fmt.Fprintf(&b, "claude_files = %s\n", tomlString(v))
+	if v := a.values["provider"]; v != "" {
+		fmt.Fprintf(&b, "provider = %s\n", tomlString(v))
+	}
+	if v := a.values["agent_files"]; v != "" && v != "repo" {
+		fmt.Fprintf(&b, "agent_files = %s\n", tomlString(v))
 	}
 	fmt.Fprintf(&b, "modules = %s\n", tomlList(modules))
 	type entry struct{ key, value string }
