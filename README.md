@@ -1,6 +1,6 @@
 # mingo
 
-My way to handle multiple remote claude code agents across multiple projects. It was made for myself, so many of the choices may not suit you.
+My way to handle multiple remote (or local) agents across multiple projects and machines, all from my own computer over ssh. The agents run in Claude Code for now. It was made for myself, so many of the choices may not suit you.
 
 ## Install
 
@@ -16,8 +16,8 @@ Make sure `~/.local/bin` is on your PATH.
 
 ```
 $ mingo help
-mingo runs agent sessions for every project on this machine, one tmux session per role, each
-running the project's agent CLI, which for now is Claude Code.
+mingo runs agent sessions for every project on this machine and on the hosts it drives over ssh,
+one tmux session per role, each running the project's agent CLI, which for now is Claude Code.
 
 A target is <project>/<role>. A role may be an alias and a project its id, and the project may be
 left out inside a project's clone, with MINGO_PROJECT set, or with a default project.
@@ -140,7 +140,7 @@ Make the cloud-init file on your own computer and paste it in as user data when 
 MINGO_USER=you provision/make-cloud-init.sh ~/.ssh/id_ed25519.pub > cloud-init.yaml
 ```
 
-The server sets itself up on the first boot and reboots. Then SSH in as that user, run `gh auth login` and `claude auth login`, set your git name and email, and install mingo as above.
+The server sets itself up on the first boot and reboots. Then SSH in as that user, run `gh auth login` and `claude auth login`, and set your git name and email. Then either install mingo on it as above, or add it from your own computer with `mingo host add`, which installs mingo there itself.
 
 ## Every key
 

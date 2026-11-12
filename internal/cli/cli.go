@@ -23,8 +23,8 @@ import (
 	"github.com/Lindeneg/mingo/internal/remote"
 )
 
-const usage = `mingo runs agent sessions for every project on this machine, one tmux session per role, each
-running the project's agent CLI, which for now is Claude Code.
+const usage = `mingo runs agent sessions for every project on this machine and on the hosts it drives over ssh,
+one tmux session per role, each running the project's agent CLI, which for now is Claude Code.
 
 A target is <project>/<role>. A role may be an alias and a project its id, and the project may be
 left out inside a project's clone, with MINGO_PROJECT set, or with a default project.

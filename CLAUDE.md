@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-mingo runs agent sessions, through a provider for each agent CLI with Claude Code the first, for every project on one machine: a tmux session per role, a loop that starts a fresh session from the role's handoff whenever one ends, shared slots for heavy commands, guards for unattended sessions, and a kit of modules that sets a project up, from bare sessions to a whole team with its workflow, CI and review. `README.md` says how it is used.
+mingo runs agent sessions, through a provider for each agent CLI with Claude Code the first, for every project on one machine, or on many driven over ssh from the owner's computer: a tmux session per role, a loop that starts a fresh session from the role's handoff whenever one ends, shared slots for heavy commands, guards for unattended sessions, and a kit of modules that sets a project up, from bare sessions to a whole team with its workflow, CI and review. `README.md` says how it is used.
 
 ## Layout
 
