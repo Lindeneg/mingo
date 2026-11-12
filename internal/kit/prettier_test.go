@@ -108,7 +108,7 @@ func TestDoctorLeavesPrettierOutWhereTheProjectHasNone(t *testing.T) {
 	}
 }
 
-func TestDoctorWithLocalClaudeFilesChecksThemAgainstPrettierToo(t *testing.T) {
+func TestDoctorWithLocalAgentFilesChecksThemAgainstPrettierToo(t *testing.T) {
 	w := localWorld(t)
 	w.apply()
 	w.merge()

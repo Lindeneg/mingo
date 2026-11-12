@@ -29,25 +29,25 @@ A project whose config does not load shows its error in its place, and ls exits 
 `,
 	"agents": `mingo agents [project...]
 
-Shows each role's session: its state, how long it has been up, and its Remote Control link. The
-state is stopped, starting, between (one session has ended and the next has not started), or what
-Claude Code says of the session, such as busy or idle. With no project, every project. A project
-whose config does not load shows its error in its place, and agents exits 1.
+Shows each role's session: its state, how long it has been up, and its remote link, Claude Code's
+Remote Control. The state is stopped, starting, between (one session has ended and the next has not
+started), or what the agent CLI says of the session, such as busy or idle. With no project, every
+project. A project whose config does not load shows its error in its place, and agents exits 1.
 `,
 	"status": `mingo status [project...]
 
-Says of each role whether its session is running, between sessions or not running, and the model
-and effort it runs on or would start on, then the Claude login of this machine. With no project,
-every project. A project whose config does not load shows its error in its place, and status
-exits 1.
+Says of each role whether its session is running, between sessions or not running, and the model and
+effort it runs on or would start on, then the agent CLI's login on this machine. With no project,
+every project. A project whose config does not load shows its error in its place, and status exits
+1.
 `,
 	"start": `mingo start [--autostart] [target...]
 
-Starts a tmux session per role. Each runs the role's loop: Claude Code in the role's clone with the
-project's opener, started again whenever a session ends, so a fresh session goes on from the
-handoff. A project starts every role, a role starts alone, and a role already running is left as
-it is. With no target, the default project. Every target is checked before any session starts, and
-nothing starts while Claude Code is not installed.
+Starts a tmux session per role. Each runs the role's loop: the project's agent CLI in the role's
+clone with the project's opener, started again whenever a session ends, so a fresh session goes on
+from the handoff. A project starts every role, a role starts alone, and a role already running is
+left as it is. With no target, the default project. Every target is checked before any session
+starts, and nothing starts while the agent CLI is not installed.
 
   --autostart   a project starts only the roles its autostart names, as the boot service does
 
@@ -67,11 +67,11 @@ checked before any session is asked. MINGO_STOP_WAIT changes the wait, in second
 `,
 	"restart": `mingo restart [--force] <target>
 
-Ends a role's session where it stands: the loop types /exit within seconds and starts a fresh
-session, which goes on from the handoff. The session's context is lost, so its last handoff is what
-the fresh one starts from.
+Ends a role's session where it stands: the loop types the agent CLI's exit, /exit for Claude Code,
+within seconds and starts a fresh session, which goes on from the handoff. The session's context is
+lost, so its last handoff is what the fresh one starts from.
 
-  --force   for a session a question or a long turn holds: Ctrl+C first, then /exit, and the
+  --force   for a session a question or a long turn holds: Ctrl+C first, then the exit, and the
             session's process is ended when that does not end it
 ` + targets + asWritten,
 	"attach": `mingo attach <target>
@@ -101,11 +101,11 @@ seconds.
 	"clear": `mingo clear
 
 For a session to run as its last tool call: the role's loop ends the session within seconds and
-starts a fresh one, which goes on from the handoff. Write the handoff first, since /exit ends the
-session where it stands. The project and role come from MINGO_PROJECT and MINGO_ROLE, which the
-loop sets, and then the config is not read, so a config that does not load does not stop it. Else
-they come from the clone the command runs in. With no session of the role running, it says so and
-changes nothing.
+starts a fresh one, which goes on from the handoff. Write the handoff first, since the exit the loop
+types ends the session where it stands. The project and role come from MINGO_PROJECT and MINGO_ROLE,
+which the loop sets, and then the config is not read, so a config that does not load does not stop
+it. Else they come from the clone the command runs in. With no session of the role running, it says
+so and changes nothing.
 `,
 	"path": `mingo path <target>
 
@@ -158,11 +158,11 @@ kept as it was left.
 
 Makes what each role needs on this machine, leaving what is there as it is:
   the clone, cloned from the project's repo with gh
-  the clone marked as trusted in ~/.claude.json, then the role's .env from .env.example when the
-  project has port offsets, or the offset line set in the .env it has, for a clone that was there
-  before too
-  the memory folder, with a MEMORY.md that points at handoff-<role>.md, and the pointer put first
-  in a MEMORY.md that lacks it
+  the clone marked as trusted where the agent CLI keeps that, ~/.claude.json for Claude Code, then
+  the role's .env from .env.example when the project has port offsets, or the offset line set in
+  the .env it has, for a clone that was there before too
+  the memory folder, with the index the CLI reads first, MEMORY.md for Claude Code, pointing at
+  handoff-<role>.md, and the pointer put first in an index that lacks it
 
 Cloning needs gh and git installed, gh logged in and a git identity.
 `,
@@ -183,57 +183,58 @@ offset in its clone's .env.
 
 Before it changes anything it checks the modules and the files they render, the lead's clone with
 its remote origin and base branch, the lock, the files the repository already has, and with
-claude_files = "local" every clone, so a mistake there changes nothing. Then it sets up the memory
+agent_files = "local" every clone, so a mistake there changes nothing. Then it sets up the memory
 folders, the port offsets, the ruleset and the labels, in that order, pushes, and writes local
-Claude's files into the clones, with the ruleset after the push on an empty repository. A step that
+agent files into the clones, with the ruleset after the push on an empty repository. A step that
 fails stops apply there, with the steps before it done, and mingo doctor shows what is still missing.
 
 While the pull request is open, a later apply adds its commit on top, so what was pushed to the
 branch stays. .mingo/kit.lock records each file's module, the mingo version and a hash. A file
 still as mingo rendered it is replaced. A file the project changed, or had before mingo, is left
 alone, and what mingo renders for it is shown. A file no module renders any more is removed while
-it is still as rendered. CLAUDE.md, package.json and .claude/settings.json stay the project's:
-mingo only adds its lines, wraps the heavy scripts, and sets the attribution key. A second apply
-changes nothing.
+it is still as rendered. The instructions file, package.json and the agent CLI's settings, CLAUDE.md
+and .claude/settings.json for Claude Code, stay the project's: mingo only adds its lines, wraps the
+heavy scripts, and sets the attribution key. A second apply changes nothing.
 
 Until the repository has a package.json, mingo leaves the heavy scripts out, and until a clone has
 an .env or an .env.example, its port offset. On a private repository whose plan has no rulesets,
 which takes GitHub Pro, Team or Enterprise Cloud, it leaves the ruleset out. It says so each time,
 and mingo doctor reports the scripts and the offset as missing and the ruleset as not available.
 
-With claude_files = "local", Claude's files stay out of the repository: CLAUDE.md, made of the text
-mingo claude edit keeps and mingo's lines, the files it imports and .claude go straight into every
-clone, and each clone's .git/info/exclude keeps them out of git. Their lock is each clone's
-.git/mingo/kit.lock, and the same rules hold. A repository that has one of them is refused until it
-is taken out.
+With agent_files = "local", the agent files stay out of the repository: the instructions file, made
+of the text mingo instructions edit keeps and mingo's lines, the files it imports and the CLI's
+folder, .claude for Claude Code, go straight into every clone, and each clone's .git/info/exclude
+keeps them out of git. Their lock is each clone's .git/mingo/kit.lock, and the same rules hold. A
+repository that has one of them is refused until it is taken out.
 
-apply works through the lead's clone, and with local Claude's files through every clone, so mingo
+apply works through the lead's clone, and with local agent files through every clone, so mingo
 setup comes first.
 `,
 	"doctor": `mingo doctor <project>
 
 Says what of the project's modules is in place and what is missing, with the command that fixes
 each, and the steps only the owner can take, such as the review's token. It reads the base branch,
-so a file waiting in the kit's pull request counts as missing. With claude_files = "local" it reads
-Claude's files in every clone too. Where package.json has Prettier, it names each of mingo's files
+so a file waiting in the kit's pull request counts as missing. With agent_files = "local" it reads
+the agent files in every clone too. Where package.json has Prettier, it names each of mingo's files
 that neither .gitignore nor .prettierignore keeps out of it, since a format would rewrite them and
 break their hashes. What it cannot find out, such as the labels while gh is logged out, it names
 with gh's error and counts as neither. It exits 1 while anything is missing or could not be checked.
 `,
 	"secret": `mingo secret review <project>
 
-Sets the review's token on the project's repository, the secret CLAUDE_CODE_OAUTH_TOKEN that the
-review workflow runs with. Run claude setup-token first, then this, and paste what it printed. At a
-terminal what is pasted is not shown, and without one the token is read from stdin.
+Sets the review's token on the project's repository, the secret the review workflow runs with,
+CLAUDE_CODE_OAUTH_TOKEN for Claude Code. Run the provider's token command first, claude setup-token
+for Claude Code, then this, and paste what it printed. At a terminal what is pasted is not shown,
+and without one the token is read from stdin.
 `,
 	"secret review": "",
-	"claude": `mingo claude edit <project>
+	"instructions": `mingo instructions edit <project>
 
-Opens the CLAUDE.md of a project whose claude_files is local in $EDITOR, or vi without one. mingo
-keeps it in ~/.config/mingo/projects/<project>/CLAUDE.md, out of every repository, and mingo apply
-writes it into every clone with mingo's lines below it.
+Opens the instructions file of a project whose agent_files is local in $EDITOR, or vi without one,
+CLAUDE.md for Claude Code. mingo keeps it in ~/.config/mingo/projects/<project>/, out of every
+repository, and mingo apply writes it into every clone with mingo's lines below it.
 `,
-	"claude edit": "",
+	"instructions edit": "",
 	"pr": `mingo pr merge <number>
 mingo pr rebase <branch>
 
@@ -283,10 +284,11 @@ or a script file.
 Sets up this machine for mingo, and changes nothing when run again:
   copies this binary to ~/.local/bin/mingo
   writes ~/.tmux.conf when there is none
-  adds the guards, deny rules for pkill and killall, and the settings sessions message each other
-  with to ~/.claude/settings.json, keeping every other key, and prints each key it changed with its
-  old and new value. A settings.json that is a link is written where the link points. A guard an
-  older mingo wrote with mingo's path unquoted is quoted, since sh splits the path at a space.
+  writes each agent CLI's settings. For Claude Code it adds the guards, deny rules for pkill and
+  killall, and the settings sessions message each other with to ~/.claude/settings.json, keeping
+  every other key, and prints each key it changed with its old and new value. A settings.json that
+  is a link is written where the link points. A guard an older mingo wrote with mingo's path
+  unquoted is quoted, since sh splits the path at a space, and one without its provider gets it.
 `,
 	"heavy": `mingo heavy <label> -- <command...>
 
@@ -338,10 +340,10 @@ does the same, before any --.
 	"loop": `mingo loop <project> <role>
 mingo loop --check <project> <role>
 
-What mingo start runs in each session's pane: Claude Code in the role's clone, started again
-whenever a session ends. A session that ends within a minute by itself is a failed start, and the
-wait before the next one doubles, up to five minutes. A session that mingo restart or mingo clear
-ended is no failed start. mingo stop ends a loop that waits between sessions within a second.
+What mingo start runs in each session's pane: the project's agent CLI in the role's clone, started
+again whenever a session ends. A session that ends within a minute by itself is a failed start, and
+the wait before the next one doubles, up to five minutes. A session that mingo restart or mingo
+clear ended is no failed start. mingo stop ends a loop that waits between sessions within a second.
 
 At each session boundary the loop hands over to the mingo on disk, so a rebuilt mingo takes over,
 but only when that mingo answers mingo version and takes the config. --check asks it: it prints
@@ -350,7 +352,7 @@ answer --check is not handed over to.
 
 When the project's config does not load, the loop says why in its pane: at its start it tries
 again every few seconds, and at a session boundary it goes on with the config it loaded and tries
-again at the next one. When claude cannot be found, it says so and looks again every few seconds.
+again at the next one. When the CLI cannot be found, it says so and looks again every few seconds.
 It is not for running by hand.
 `,
 }
@@ -365,7 +367,7 @@ whose TEAM.md has the rules.
 
 func init() {
 	pages["secret review"] = pages["secret"]
-	pages["claude edit"] = pages["claude"]
+	pages["instructions edit"] = pages["instructions"]
 	pages["away"] = "mingo away <project>\nmingo back <project>\n\n" + awayText
 	pages["back"] = "mingo back <project>\nmingo away <project>\n\n" + awayText
 }
@@ -457,7 +459,7 @@ func defaultText(def string) string {
 		return "10, 20 and on in role order unless set"
 	case "{read}":
 		prov := config.DefaultProvider()
-		return config.DefaultRead(prov, "repo") + ", or " + config.DefaultRead(prov, "local") + " when Claude's files are local, unless set"
+		return config.DefaultRead(prov, "repo") + ", or " + config.DefaultRead(prov, "local") + " when the agent files are local, unless set"
 	}
 	return def + " unless set"
 }

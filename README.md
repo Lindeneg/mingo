@@ -4,7 +4,7 @@ My way to handle multiple remote claude code agents across multiple projects. It
 
 ## Install
 
-You'll need [tmux](https://github.com/tmux/tmux), [git](https://github.com/git/git), [Go 1.27 or newer](https://github.com/golang/go), [gh](https://cli.github.com/) and [claude code](https://claude.com/product/claude-code).
+You'll need [tmux](https://github.com/tmux/tmux), [git](https://github.com/git/git), [Go 1.27 or newer](https://github.com/golang/go), [gh](https://cli.github.com/) and an agent CLI for the sessions, which for now is [claude code](https://claude.com/product/claude-code), the one mingo has a provider for.
 
 ```bash
 git clone https://github.com/Lindeneg/mingo.git
@@ -16,13 +16,14 @@ Make sure `~/.local/bin` is on your PATH.
 
 ```
 $ mingo help
-mingo runs Claude Code sessions for every project on this machine, one tmux session per role.
+mingo runs agent sessions for every project on this machine, one tmux session per role, each
+running the project's agent CLI, which for now is Claude Code.
 
 A target is <project>/<role>. A role may be an alias and a project its id, and the project may be
 left out inside a project's clone, with MINGO_PROJECT set, or with a default project.
 
 Sessions
-  mingo agents [project...]             live sessions with state, uptime and Remote Control link
+  mingo agents [project...]             live sessions with state, uptime and remote link
   mingo attach <target>                 attach, detach with Ctrl+B then D
   mingo away <project>                  the owner is away, the sessions take defaults instead of asking
   mingo back <project>                  the owner is back, the sessions ask again
@@ -32,7 +33,7 @@ Sessions
   mingo ro <target>                     attach read only
   mingo say <target> <message>          type a message into a session
   mingo start [--autostart] [target...] start roles, a whole project when no role is named
-  mingo status [project...]             each role's state, model and effort, and the Claude login
+  mingo status [project...]             each role's state, model and effort, and the agent CLI's login
   mingo stop [target...]                ask sessions to exit, close what is left after a minute and a half
 
 Projects
@@ -47,10 +48,10 @@ Projects
 
 Kit
   mingo apply <project>                 land the files of the project's modules through a pull request
-  mingo claude edit <project>           a local project's CLAUDE.md, which mingo apply writes into every clone
   mingo doctor <project>                what of the project's modules is in place and what is missing
+  mingo instructions edit <project>     a local project's instructions file, which mingo apply writes into every clone
   mingo new <name> [--preset p] [...]   a project from a preset, its config, clones and files, asking what flags leave out
-  mingo secret review <project>         set the review's token from what claude setup-token printed
+  mingo secret review <project>         set the review's token from what the provider's token command printed
 
 Team
   mingo gate <log>                      run the project's gate targets into a log, stopping at the first red one
@@ -60,7 +61,7 @@ Team
 
 Other
   mingo help [command]                  this list, or what a command does
-  mingo install                         the command, tmux and Claude settings
+  mingo install                         the command, tmux and the agent CLI's settings
   mingo version                         this mingo's version
 
 mingo help <command> explains a command, and so does mingo <command> --help.
@@ -105,7 +106,7 @@ At a terminal `mingo new` asks for what its flags leave out, checks each answer 
 | guards | the write and kill guards |
 | workflow | issue, branch, pull request, merge with `mingo pr merge`, and the skills that go with it |
 | ci | a GitHub Actions workflow with a job per check, for pnpm, npm, go or any other stack with its own commands |
-| review | a Claude review of every pull request |
+| review | an AI review of every pull request, Claude Code's on a project that runs it |
 | skills | sub-agents, edge-cases and spend skills |
 | team | `TEAM.md` with the team's rules, and the clear-context skill |
 | tracker | planning with Linear or GitHub Issues, and a label per role |
@@ -139,8 +140,9 @@ clone = "~/dev/{project}/{role}"   # leave {role} out for a project of one role
 lead = "lead"                      # the first role by default
 opener = "You are the {role}. Read your handoff memory, then continue."
 autostart = ["lead"]               # what mingo service starts at boot
-claude_args = ["--permission-mode", "auto", "--remote-control"]
-claude_files = "repo"              # or local: CLAUDE.md, what it imports and .claude in each clone, out of git
+provider = "claude"                # the agent CLI the sessions run, claude (Claude Code) by default and for now the only one
+args = ["--permission-mode", "auto", "--remote-control"]   # passed to the CLI, the provider's own by default
+agent_files = "repo"               # or local: the instructions file (CLAUDE.md), what it imports and the CLI's folder (.claude) in each clone, out of git
 modules = ["workflow", "ci", "review", "team", "tracker"]   # sessions is always on
 
 [[roles]]
@@ -175,8 +177,8 @@ generate_list = ["node tools/generate.mjs --list"]   # these two without a shell
 generate = ["node tools/generate.mjs"]
 generated = '^generate: wrote (.+)$'
 # review_line, no_findings, review_heading, footers and trailers tell the review comment and
-# attribution apart, and default to "review:", "no findings", "## Review", Claude Code's footer
-# and session link, and Co-Authored-By and Claude-Session
+# attribution apart, and default to "review:", "no findings", "## Review" and the provider's footers
+# and trailers, for Claude Code its footer and session link, and Co-Authored-By and Claude-Session
 
 [[workflow.shared]]                # a list everyone appends to
 name = "the route list"
@@ -191,7 +193,7 @@ stack = "pnpm"                     # pnpm, npm, go or other, which the ci module
 check = "pnpm check"               # a shell line for one of the checks, pnpm <check> or npm run <check> by default
 
 [review]
-read = "CLAUDE.md first"           # README.md first when claude_files is local
+read = "CLAUDE.md first"           # the instructions file first by default, README.md first when agent_files is local
 categories = ["correctness (a wrong result, a crash)", "a missing test for an edge case"]
 skip = "formatting, lint or style"
 

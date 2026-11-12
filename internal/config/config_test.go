@@ -134,7 +134,7 @@ func TestEnvironmentOverridesModelAndEffort(t *testing.T) {
 
 func TestOneProjectsSettingsDoNotLeak(t *testing.T) {
 	setupHome(t)
-	addProject(t, "one", `claude_args = ["--x"]`, `[[roles]]`, `name = "a"`, `aliases = ["x"]`, `model = "m1"`)
+	addProject(t, "one", `args = ["--x"]`, `[[roles]]`, `name = "a"`, `aliases = ["x"]`, `model = "m1"`)
 	addProject(t, "two", `[[roles]]`, `name = "b"`)
 	if one := mustLoad(t, "one"); strings.Join(one.Args(), " ") != "--x" {
 		t.Fatal(one.Args())
@@ -144,7 +144,7 @@ func TestOneProjectsSettingsDoNotLeak(t *testing.T) {
 		t.Fatal("alias x leaked")
 	}
 	if two.Model("a") != "" || strings.Join(two.Args(), " ") != "--test default" {
-		t.Fatal("model or claude_args leaked")
+		t.Fatal("model or args leaked")
 	}
 }
 
@@ -331,22 +331,22 @@ func TestWorkflowAndTrackerMistakesAreRefused(t *testing.T) {
 	}
 }
 
-func TestClaudeFilesAreInTheRepoUnlessLocalAndALocalProjectsReviewReadsTheReadme(t *testing.T) {
+func TestAgentFilesAreInTheRepoUnlessLocalAndALocalProjectsReviewReadsTheReadme(t *testing.T) {
 	setupHome(t)
 	addProject(t, "kept", `[[roles]]`, `name = "lead"`)
-	if p := mustLoad(t, "kept"); p.ClaudeFiles != "repo" || p.ClaudeLocal() || p.Review.Read != "AGENTS.md first" {
-		t.Fatal(p.ClaudeFiles, p.Review.Read)
+	if p := mustLoad(t, "kept"); p.AgentFiles != "repo" || p.AgentLocal() || p.Review.Read != "AGENTS.md first" {
+		t.Fatal(p.AgentFiles, p.Review.Read)
 	}
-	addProject(t, "own", `claude_files = "local"`, `[[roles]]`, `name = "lead"`)
-	if p := mustLoad(t, "own"); !p.ClaudeLocal() || p.Review.Read != "README.md first" {
-		t.Fatal(p.ClaudeFiles, p.Review.Read)
+	addProject(t, "own", `agent_files = "local"`, `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "own"); !p.AgentLocal() || p.Review.Read != "README.md first" {
+		t.Fatal(p.AgentFiles, p.Review.Read)
 	}
-	addProject(t, "set", `claude_files = "local"`, `[review]`, `read = "docs/ first"`, `[[roles]]`, `name = "lead"`)
+	addProject(t, "set", `agent_files = "local"`, `[review]`, `read = "docs/ first"`, `[[roles]]`, `name = "lead"`)
 	if p := mustLoad(t, "set"); p.Review.Read != "docs/ first" {
 		t.Fatal(p.Review.Read)
 	}
-	addProject(t, "wrong", `claude_files = "home"`, `[[roles]]`, `name = "lead"`)
-	if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), "has claude_files home, use repo or local") {
+	addProject(t, "wrong", `agent_files = "home"`, `[[roles]]`, `name = "lead"`)
+	if _, err := Load("wrong"); err == nil || !strings.Contains(err.Error(), "has agent_files home, use repo or local") {
 		t.Fatal(err)
 	}
 }
@@ -438,4 +438,25 @@ func TestHoldsDirSeesAClonePastALink(t *testing.T) {
 	if !p.HoldsDir(real) || !p.HoldsDir(filepath.Join(home, "dev", "demo", "lead")) || p.HoldsDir(filepath.Join(filepath.Dir(home), "disk")) {
 		t.Fatal("holds")
 	}
+}
+
+func TestAProjectRunsTheProviderItNamesAndTheDefaultOneWithoutAndAnUnknownOneIsRefused(t *testing.T) {
+	setupHome(t)
+	addProject(t, "plain", `[[roles]]`, `name = "lead"`)
+	if p := mustLoad(t, "plain"); p.ProviderName != "claude" || p.Provider().Title() != "Test CLI" {
+		t.Fatal(p.ProviderName)
+	}
+	addProject(t, "other", `provider = "codex"`, `[[roles]]`, `name = "lead"`)
+	if _, err := Load("other"); err == nil || !strings.HasSuffix(err.Error(), `names the provider "codex", mingo has claude`) {
+		t.Fatal(err)
+	}
+}
+
+func TestTheKeysNamedForClaudeCodeAreRefusedWithTheirNewNames(t *testing.T) {
+	setupHome(t)
+	refused(t, map[string][]string{
+		"has the key claude_files, which is agent_files now":                       {`claude_files = "local"`},
+		"has the key claude_args, which is args now":                               {`claude_args = ["--x"]`},
+		"claude_args, which is args now\n  claude_files, which is agent_files now": {`claude_args = ["--x"]`, `claude_files = "local"`},
+	})
 }

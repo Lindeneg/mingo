@@ -202,7 +202,7 @@ func TestNewMakesAFullProjectAndASecondApplyChangesNothing(t *testing.T) {
 	}
 }
 
-func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *testing.T) {
+func TestNewWithLocalAgentFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *testing.T) {
 	h := newHome(t)
 	h.write(filepath.Join(h.home, ".gitconfig"), "[user]\n\tname = Kit Test\n\temail = kit@example.test\n[commit]\n\tgpgsign = false\n")
 	origin := filepath.Join(h.root, "origin.git")
@@ -216,7 +216,7 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 	h.runIn(seed, nil, "git", "push", "--quiet", origin, "master")
 	h.fakeGitHub(origin)
 
-	r := h.mingo("new", "demo", "--preset", "team", "--repo", "x/demo", "--roles", "lead,dev", "--tracker-kind", "github", "--claude-files", "local")
+	r := h.mingo("new", "demo", "--preset", "team", "--repo", "x/demo", "--roles", "lead,dev", "--tracker-kind", "github", "--agent-files", "local")
 	if r.code != 0 {
 		t.Fatal(r.out)
 	}
@@ -251,7 +251,7 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 		t.Fatal(r.out)
 	}
 	h.fakeTool("fake-editor", `printf '# demo rules\n' >"$1"`)
-	if r := h.runIn(h.root, []string{"EDITOR=fake-editor"}, h.bin, "claude", "edit", "demo"); r.code != 0 {
+	if r := h.runIn(h.root, []string{"EDITOR=fake-editor"}, h.bin, "instructions", "edit", "demo"); r.code != 0 {
 		t.Fatal(r.out)
 	}
 	if r := h.mingo("apply", "demo"); !strings.Contains(r.out, "lead: updates CLAUDE.md\n") || !strings.Contains(r.out, "dev: updates CLAUDE.md\n") {
@@ -261,10 +261,10 @@ func TestNewWithLocalClaudeFilesKeepsThemInEveryCloneAndOutOfTheRepository(t *te
 		t.Fatal(got)
 	}
 	h.addProject("kept", `[[roles]]`, `name = "lead"`)
-	if r := h.mingo("claude", "edit", "kept"); r.code != 1 || !strings.Contains(r.out, "kept has claude_files repo, so its CLAUDE.md is in its repository") {
+	if r := h.mingo("instructions", "edit", "kept"); r.code != 1 || !strings.Contains(r.out, "kept has agent_files repo, so its CLAUDE.md is in its repository") {
 		t.Fatal(r.code, r.out)
 	}
-	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  Claude's files in dev's clone\n    in place: Claude's files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
+	if r := h.mingo("doctor", "demo"); !strings.Contains(r.out, "  the agent files in dev's clone\n    in place: the agent files out of git in .git/info/exclude\n") || !strings.Contains(r.out, "    in place: TEAM.md\n") {
 		t.Fatal(r.out)
 	}
 }

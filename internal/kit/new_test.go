@@ -213,17 +213,17 @@ func TestNewWritesStringsTOMLReadsBack(t *testing.T) {
 	}
 }
 
-func TestNewKeepsClaudesFilesLocalWhenAskedAndTheReviewThenReadsTheReadme(t *testing.T) {
-	s := &script{answers: map[string][]string{"the preset": {"solo"}, "the GitHub repository, as owner/name": {"x/demo"}, "where Claude's files go": {"local"}}}
+func TestNewKeepsTheAgentFilesLocalWhenAskedAndTheReviewThenReadsTheReadme(t *testing.T) {
+	s := &script{answers: map[string][]string{"the preset": {"solo"}, "the GitHub repository, as owner/name": {"x/demo"}, "where the agent files go": {"local"}}}
 	made, err := newAt(t, s, nil)
-	if err != nil || !strings.Contains(made.TOML, "\nclaude_files = \"local\"\n") || !strings.Contains(made.TOML, "\nread = \"README.md first\"\n") || !made.Local {
+	if err != nil || !strings.Contains(made.TOML, "\nagent_files = \"local\"\n") || !strings.Contains(made.TOML, "\nread = \"README.md first\"\n") || !made.Local {
 		t.Fatal(made.TOML, err)
 	}
-	if !strings.Contains(strings.Join(s.asked, "\n"), "what the AI review of each pull request reads before the diff [README.md first]") || !project(t, made.TOML).ClaudeLocal() {
+	if !strings.Contains(strings.Join(s.asked, "\n"), "what the AI review of each pull request reads before the diff [README.md first]") || !project(t, made.TOML).AgentLocal() {
 		t.Fatal(s.asked)
 	}
-	kept, err := newFrom(t, map[string][]string{"--preset": {"solo"}, "--repo": {"x/demo"}, "--claude-files": {"repo"}})
-	if err != nil || strings.Contains(kept.TOML, "claude_files") || !strings.Contains(kept.TOML, "\nread = \"CLAUDE.md first\"\n") {
+	kept, err := newFrom(t, map[string][]string{"--preset": {"solo"}, "--repo": {"x/demo"}, "--agent-files": {"repo"}})
+	if err != nil || strings.Contains(kept.TOML, "agent_files") || !strings.Contains(kept.TOML, "\nread = \"CLAUDE.md first\"\n") {
 		t.Fatal(kept.TOML, err)
 	}
 }
@@ -271,7 +271,7 @@ func TestEachFlagIsCheckedAsItsAnswerIsAndFailsAtOnceWithoutATerminal(t *testing
 		`--roles: "Dev" is not a role name, use lowercase letters, digits and hyphens`:                                                                                                 {"--roles": {"lead,Dev"}},
 		"--roles: the role lead is named twice":                                                                                     {"--roles": {"lead, lead"}},
 		`--roles: "lead,,dev" has an empty item, separate the items with single commas`:                                             {"--roles": {"lead,,dev"}},
-		`--claude-files: "git" is not one of repo or local`:                                                                         {"--claude-files": {"git"}},
+		`--agent-files: "git" is not one of repo or local`:                                                                          {"--agent-files": {"git"}},
 		`--tracker-kind: "linear2" is not one of linear, github or none`:                                                            {"--preset": {"team"}, "--tracker-kind": {"linear2"}},
 		`--workflow-checks: "type check" is not a GitHub job id, start it with a letter or _ and use only letters, digits, - and _`: {"--preset": {"solo"}, "--workflow-checks": {"lint, type check"}},
 		"--workflow-checks: the check test is named twice":                                                                          {"--preset": {"solo"}, "--workflow-checks": {"test,test"}},
@@ -527,8 +527,23 @@ func TestMadeSaysWhatComesNextBeforeItAsksToGoOn(t *testing.T) {
 		"  clone x/demo into ~/dev/demo/dev and ~/dev/demo/qa\n" +
 		"  use the clone already in ~/dev/demo/lead\n" +
 		"  open a pull request on x/demo with the kit's files\n" +
-		"  write Claude's files into each clone, out of git\n"
+		"  write the agent files into each clone, out of git\n"
 	if got := m.Next("/c/demo.toml"); got != want {
 		t.Fatal(got)
+	}
+}
+
+func TestNewWritesTheProviderAndAsksForItWhenMingoHasMoreThanOne(t *testing.T) {
+	s := &script{answers: map[string][]string{"the preset": {"bare"}, "the GitHub repository, as owner/name": {"x/demo"}, "the agent CLI the sessions run": {"testcli"}}}
+	made, err := newAt(t, s, nil)
+	if err != nil || !strings.Contains(made.TOML, "\nprovider = \"testcli\"\n") || !strings.Contains(strings.Join(s.asked, "\n"), "the agent CLI the sessions run [claude]") {
+		t.Fatal(made.TOML, s.asked, err)
+	}
+	made, err = newFrom(t, map[string][]string{"--preset": {"bare"}, "--repo": {"x/y"}})
+	if err != nil || !strings.Contains(made.TOML, "\nprovider = \"claude\"\n") {
+		t.Fatal(made.TOML, err)
+	}
+	if _, err := newFrom(t, map[string][]string{"--preset": {"bare"}, "--repo": {"x/y"}, "--provider": {"codex"}}); err == nil || !strings.Contains(err.Error(), `--provider: "codex" is not one of claude or testcli`) {
+		t.Fatal(err)
 	}
 }

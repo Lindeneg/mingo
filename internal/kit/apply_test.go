@@ -9,7 +9,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -102,8 +101,8 @@ func (w *world) prepare() {
 	}
 	p := project(w.t, text)
 	if w.claude != "" {
-		os.MkdirAll(filepath.Dir(config.ClaudeFile(p.Name)), 0o755)
-		os.WriteFile(config.ClaudeFile(p.Name), []byte(w.claude), 0o644)
+		os.MkdirAll(filepath.Dir(p.InstructionsFile()), 0o755)
+		os.WriteFile(p.InstructionsFile(), []byte(w.claude), 0o644)
 	}
 	run := func(o team.Options, name string, args ...string) (team.Result, error) {
 		if name == "git" && w.before != nil {

@@ -170,9 +170,9 @@ func TestNewAtATerminalAsksAgainUntilEachAnswerHoldsAndWritesNothingWhenDeclined
 	term.expect("✓ the roles, in the order they start: lead,dev")
 	term.expect("? the role that merges (lead): ")
 	term.send("\r")
-	term.expect("? where Claude's files go")
+	term.expect("? where the agent files go")
 	term.send("j\r")
-	term.expect("✓ where Claude's files go: local")
+	term.expect("✓ where the agent files go: local")
 	term.expect("? how CI installs the project")
 	term.send("\r")
 	term.expect("? the CI jobs every pull request must pass, such as test or build (check, test, build, security): ")
@@ -198,7 +198,7 @@ func TestNewAtATerminalAsksAgainUntilEachAnswerHoldsAndWritesNothingWhenDeclined
 	term.expect("✓ the commands a role runs before it opens a pull request: none")
 	term.expect("? the role tags a pull request description starts with, such as (lead): ")
 	term.send("\r")
-	term.expect("\nmingo new will\n  write the config " + file + "\n  clone x/demo into ~/dev/demo/lead and ~/dev/demo/dev\n  open a pull request on x/demo with the kit's files\n  write Claude's files into each clone, out of git\n")
+	term.expect("\nmingo new will\n  write the config " + file + "\n  clone x/demo into ~/dev/demo/lead and ~/dev/demo/dev\n  open a pull request on x/demo with the kit's files\n  write the agent files into each clone, out of git\n")
 	term.expect("? Continue? (Y/n) ")
 	term.send("n")
 	term.expect("✓ Continue? no\nmingo: nothing was written")
@@ -272,7 +272,7 @@ func TestNewAtATerminalGoesOnWhenToldAndMakesTheProject(t *testing.T) {
 	h.fakeGitHub(origin)
 	file := filepath.Join(h.config, "projects", "demo.toml")
 	term := h.onTerminal(nil, "new", "demo", "--preset", "bare", "--repo", "x/demo")
-	for _, q := range []string{"? the project's display name (demo): ", "? the roles, in the order they start (lead): ", "? the role that merges (lead): ", "? where Claude's files go"} {
+	for _, q := range []string{"? the project's display name (demo): ", "? the roles, in the order they start (lead): ", "? the role that merges (lead): ", "? where the agent files go"} {
 		term.expect(q)
 		term.send("\r")
 	}

@@ -25,8 +25,13 @@ question = "the role that merges"
 default = "{first role}"
 
 [[asks]]
-key = "claude_files"
-question = "where Claude's files go"
+key = "provider"
+question = "the agent CLI the sessions run"
+default = "claude"
+
+[[asks]]
+key = "agent_files"
+question = "where the agent files go"
 default = "repo"
 choices = [
     { value = "repo", hint = "in the repository, shared through git" },

@@ -41,18 +41,18 @@ func (e *env) apply(name string) error {
 	return kit.Apply(d)
 }
 
-func (e *env) claude(action, name string) error {
+func (e *env) instructions(action, name string) error {
 	if action != "edit" || name == "" {
-		return badUsage("", "claude")
+		return badUsage("", "instructions")
 	}
 	p, err := config.Find(name)
 	if err != nil {
 		return err
 	}
-	if !p.ClaudeLocal() {
-		return fmt.Errorf("%s has claude_files repo, so its CLAUDE.md is in its repository", p.Name)
+	if !p.AgentLocal() {
+		return fmt.Errorf("%s has agent_files repo, so its %s is in its repository", p.Name, p.Provider().Kit().Instructions)
 	}
-	file := config.ClaudeFile(p.Name)
+	file := p.InstructionsFile()
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
