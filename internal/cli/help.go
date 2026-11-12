@@ -228,6 +228,28 @@ for Claude Code, then this, and paste what it printed. At a terminal what is pas
 and without one the token is read from stdin.
 `,
 	"secret review": "",
+	"host": `mingo host add <name> <destination>
+mingo host add <name> --local
+mingo host ls
+mingo host rm <name>
+
+The machines mingo drives from this computer, kept in ~/.config/mingo/hosts.toml. A host is this
+machine itself, or one reached over ssh by a destination, user@server or a Host of ~/.ssh/config,
+which must take a key without a prompt. Without hosts mingo works on this machine alone. A host is
+Linux or macOS.
+
+add with a destination checks that ssh reaches it and that it is Linux or macOS, finds Go there,
+installs this mingo's own version with go install, and runs that mingo's install, which puts it in
+~/.local/bin and sets the machine up as mingo install says. Adding the host again installs again. A
+mingo built from uncommitted changes cannot be installed, since a host builds it from GitHub. add
+--local adds this machine, which can be one host only.
+
+ls lists each host with its destination and the version of its mingo, or what kept ssh from
+asking. rm takes a host off the list and leaves mingo installed there.
+`,
+	"host add": "",
+	"host ls":  "",
+	"host rm":  "",
 	"instructions": `mingo instructions edit <project>
 
 Opens the instructions file of a project whose agent_files is local in $EDITOR, or vi without one,
@@ -289,6 +311,8 @@ Sets up this machine for mingo, and changes nothing when run again:
   every other key, and prints each key it changed with its old and new value. A settings.json that
   is a link is written where the link points. A guard an older mingo wrote with mingo's path
   unquoted is quoted, since sh splits the path at a space, and one without its provider gets it.
+On a computer whose hosts are all reached over ssh it copies the binary alone, since the sessions
+run on the hosts.
 `,
 	"heavy": `mingo heavy <label> -- <command...>
 
@@ -368,6 +392,9 @@ whose TEAM.md has the rules.
 func init() {
 	pages["secret review"] = pages["secret"]
 	pages["instructions edit"] = pages["instructions"]
+	for _, action := range []string{"add", "ls", "rm"} {
+		pages["host "+action] = pages["host"]
+	}
 	pages["away"] = "mingo away <project>\nmingo back <project>\n\n" + awayText
 	pages["back"] = "mingo back <project>\nmingo away <project>\n\n" + awayText
 }

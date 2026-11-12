@@ -46,6 +46,12 @@ Projects
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
   mingo setup <project>                 clone missing roles and make their memory folders
 
+Hosts
+  mingo host add <name> <destination>   add a machine reached over ssh, and install this mingo there
+  mingo host add <name> --local         add this machine itself
+  mingo host ls                         the hosts with where they are and their mingo
+  mingo host rm <name>                  take a host off the list
+
 Kit
   mingo apply <project>                 land the files of the project's modules through a pull request
   mingo doctor <project>                what of the project's modules is in place and what is missing

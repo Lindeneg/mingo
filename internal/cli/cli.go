@@ -20,6 +20,7 @@ import (
 	"github.com/Lindeneg/mingo/internal/loop"
 	"github.com/Lindeneg/mingo/internal/provider"
 	_ "github.com/Lindeneg/mingo/internal/provider/claude"
+	"github.com/Lindeneg/mingo/internal/remote"
 )
 
 const usage = `mingo runs agent sessions for every project on this machine, one tmux session per role, each
@@ -51,6 +52,12 @@ Projects
   mingo repo [project]                  a project's GitHub repository
   mingo service enable|disable <project> start a project's autostart roles at boot, at login on a Mac
   mingo setup <project>                 clone missing roles and make their memory folders
+
+Hosts
+  mingo host add <name> <destination>   add a machine reached over ssh, and install this mingo there
+  mingo host add <name> --local         add this machine itself
+  mingo host ls                         the hosts with where they are and their mingo
+  mingo host rm <name>                  take a host off the list
 
 Kit
   mingo apply <project>                 land the files of the project's modules through a pull request
@@ -182,7 +189,7 @@ var most = map[string]int{
 	"repo": 1, "default": 1, "away": 1, "back": 1, "setup": 1, "install": 0, "apply": 1, "doctor": 1, "version": 0, "guard": 2,
 }
 
-var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "instructions": true}
+var withSubcommands = map[string]bool{"project": true, "pr": true, "service": true, "secret": true, "instructions": true, "host": true}
 
 type exitError int
 
@@ -210,7 +217,12 @@ func withLocalBin() {
 func Main(args []string) int {
 	withLocalBin()
 	e := &env{out: os.Stdout, err: os.Stderr, host: host.New()}
-	err := e.dispatch(args)
+	args, err := expect(args)
+	if err != nil {
+		fmt.Fprintf(e.err, "mingo: %v\n", err)
+		return remote.VersionDiffers
+	}
+	err = e.dispatch(args)
 	var code exitError
 	var bad usageError
 	switch {
@@ -311,6 +323,8 @@ func (e *env) dispatch(args []string) error {
 		return e.project(arg(0), arg(1))
 	case "setup":
 		return e.setup(arg(0))
+	case "host":
+		return e.hosts(args)
 	case "service":
 		if err := subcommand(args, "service", "enable", "disable"); err != nil {
 			return err

@@ -17,6 +17,9 @@ import (
 
 var mingoBin string
 
+// the version every test's mingo has, as a build from a clean commit would, so a host can install it
+const testVersion = "v0.0.0-20261112000000-0123456789ab"
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "mingo-bin-")
 	if err != nil {
@@ -29,7 +32,7 @@ func TestMain(m *testing.M) {
 	if goTool, err := exec.LookPath("go"); err != nil {
 		skipAll = "the end to end tests build mingo with the go command, which is not on PATH"
 	} else {
-		build := exec.Command(goTool, "build", "-o", mingoBin, ".")
+		build := exec.Command(goTool, "build", "-ldflags", "-X github.com/Lindeneg/mingo.version="+testVersion, "-o", mingoBin, ".")
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {
 			panic(err)
