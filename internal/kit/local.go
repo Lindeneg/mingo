@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider"
 )
 
-// Claude's files are CLAUDE.md, the files it imports and what is under .claude
-func claudeFile(mods []Module, path string) bool {
-	if path == Instructions || strings.HasPrefix(path, ".claude/") {
+// the agent files are the instructions file, the files it imports and what is under the CLI's folder
+func claudeFile(agent provider.Kit, mods []Module, path string) bool {
+	if path == agent.Instructions || strings.HasPrefix(path, agent.Dir+"/") {
 		return true
 	}
 	for _, m := range mods {
@@ -30,9 +31,10 @@ func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
 	if !d.Project.ClaudeLocal() {
 		return files, nil, nil
 	}
+	agent := d.Project.Provider().Kit()
 	var repo, clone []File
 	for _, f := range files {
-		if claudeFile(mods, f.Path) {
+		if claudeFile(agent, mods, f.Path) {
 			clone = append(clone, f)
 		} else {
 			repo = append(repo, f)
@@ -44,7 +46,7 @@ func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
 	}
 	text := string(own)
 	var missing []string
-	lines, _ := mingoLines(mods)
+	lines, _ := mingoLines(agent, mods)
 	for _, line := range lines {
 		if !hasLine(text, line) {
 			missing = append(missing, line)
@@ -57,32 +59,35 @@ func (d Deps) split(mods []Module, files []File) ([]File, []File, error) {
 		text += strings.Join(missing, "\n") + "\n"
 	}
 	if text != "" {
-		clone = append([]File{{Path: Instructions, Module: "sessions", Text: text}}, clone...)
+		clone = append([]File{{Path: agent.Instructions, Module: "sessions", Text: text}}, clone...)
 	}
 	return repo, clone, nil
 }
 
-// every path of Claude's that mingo writes into a clone
-func claudePaths(files []File) []string {
+// every agent file that mingo writes into a clone
+func claudePaths(prov provider.Provider, files []File) []string {
 	var paths []string
 	for _, f := range files {
 		paths = append(paths, f.Path)
 	}
-	return append(paths, Settings)
+	if a, ok := prov.(provider.Attribution); ok {
+		paths = append(paths, a.AttributionFile())
+	}
+	return paths
 }
 
-func excludes(mods []Module) []string {
-	lines := []string{"/" + Instructions}
+func excludes(agent provider.Kit, mods []Module) []string {
+	lines := []string{"/" + agent.Instructions}
 	for _, m := range mods {
 		for _, imp := range m.Imports {
 			lines = append(lines, "/"+imp)
 		}
 	}
-	return append(lines, "/.claude/")
+	return append(lines, "/"+agent.Dir+"/")
 }
 
-func planClaude(files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
-	settings, err := PlanSettings(read)
+func planClaude(prov provider.Provider, files []File, read func(path string) ([]byte, bool), lock *Lock) ([]Step, error) {
+	settings, err := PlanSettings(prov, read)
 	return append(Plan(files, read, lock), settings...), err
 }
 
@@ -168,13 +173,13 @@ func (c clone) lock() (*Lock, error) {
 }
 
 // the lines of .git/info/exclude that Claude's files still need, and what the file has
-func (c clone) unexcluded(mods []Module) ([]string, string, error) {
+func (c clone) unexcluded(agent provider.Kit, mods []Module) ([]string, string, error) {
 	data, err := os.ReadFile(c.exclude)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, "", err
 	}
 	var missing []string
-	for _, line := range excludes(mods) {
+	for _, line := range excludes(agent, mods) {
 		if !hasLine(string(data), line) {
 			missing = append(missing, line)
 		}
@@ -210,7 +215,7 @@ func (d Deps) planClones(files []File, clones []clone) ([]clonePlan, error) {
 		if err != nil {
 			return nil, err
 		}
-		steps, err := planClaude(files, c.read, lock)
+		steps, err := planClaude(d.Project.Provider(), files, c.read, lock)
 		if err != nil {
 			return nil, fmt.Errorf("in %s's clone, %v", c.role, err)
 		}
@@ -224,7 +229,7 @@ func (d Deps) applyClones(mods []Module, plans []clonePlan, scratch string) (boo
 	changed := false
 	for _, plan := range plans {
 		c, lock, steps := plan.clone, plan.lock, plan.steps
-		missing, text, err := c.unexcluded(mods)
+		missing, text, err := c.unexcluded(d.Project.Provider().Kit(), mods)
 		if err != nil {
 			return false, err
 		}

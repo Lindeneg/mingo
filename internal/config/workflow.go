@@ -89,11 +89,6 @@ func (c CI) Command(check string) string {
 	return ""
 }
 
-var (
-	DefaultFooters  = []string{`^\s*🤖 Generated with`, `claude\.ai/code/session_`}
-	DefaultTrailers = []string{"Co-Authored-By", "Claude-Session"}
-)
-
 func (p *Project) workflowDefaults(md toml.MetaData) error {
 	w := &p.Workflow
 	set := func(key string, field *string, value string) {
@@ -107,10 +102,10 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 	set("no_findings", &w.NoFindings, "no findings")
 	set("review_heading", &w.ReviewHeading, "## Review")
 	if !md.IsDefined("workflow", "footers") {
-		w.Footers = append([]string(nil), DefaultFooters...)
+		w.Footers = append([]string(nil), p.Provider().Kit().Footers...)
 	}
 	if !md.IsDefined("workflow", "trailers") {
-		w.Trailers = append([]string(nil), DefaultTrailers...)
+		w.Trailers = append([]string(nil), p.Provider().Kit().Trailers...)
 	}
 	if !md.IsDefined("workflow", "local_runs") {
 		w.LocalRuns = append(append([]string(nil), w.Gate...), "mingo gate")
@@ -173,7 +168,7 @@ func (p *Project) workflowDefaults(md toml.MetaData) error {
 		return err
 	}
 	if !md.IsDefined("review", "read") {
-		p.Review.Read = DefaultRead(p.ClaudeFiles)
+		p.Review.Read = DefaultRead(p.Provider(), p.ClaudeFiles)
 	}
 	if !md.IsDefined("review", "categories") {
 		p.Review.Categories = append([]string(nil), DefaultCategories...)

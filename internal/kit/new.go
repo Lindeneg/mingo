@@ -13,6 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/Lindeneg/mingo/internal/config"
+	"github.com/Lindeneg/mingo/internal/provider"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -63,9 +64,6 @@ var PresetHints = []string{
 }
 
 const presetQuestion = "the preset"
-
-// the review workflow posts through the Claude GitHub app, whose comments come from this login
-const ReviewBot = "claude[bot]"
 
 func (k *Kit) Preset(name string) ([]string, error) {
 	switch name {
@@ -141,7 +139,7 @@ func (a *answers) fill(text string, item string, index int) string {
 		"{name}", a.values["name"],
 		"{title}", a.values["title"],
 		"{offset}", strconv.Itoa((index+1)*10),
-		"{read}", config.DefaultRead(a.values["claude_files"]),
+		"{read}", config.DefaultRead(config.DefaultProvider(), a.values["claude_files"]),
 		"{first role}", first,
 	).Replace(text)
 }
@@ -211,6 +209,11 @@ type newRun struct {
 	each    map[string]map[string]string
 	order   map[string][]string
 	scripts map[string]bool
+}
+
+// the provider of the project being made
+func (r *newRun) provider() provider.Provider {
+	return config.DefaultProvider()
 }
 
 // the flags as they were given, trimmed, each named once unless it is per check or per role
@@ -356,7 +359,7 @@ func (k *Kit) New(name string, flags map[string][]string, d NewDeps) (Made, erro
 		delete(r.a.values, "tracker.kind")
 	}
 	if contains(r.modules, "review") {
-		r.a.values["workflow.reviewer"] = ReviewBot
+		r.a.values["workflow.reviewer"] = r.provider().Kit().Review.Bot
 	}
 	text, err := r.a.toml(name, preset, r.modules)
 	if err != nil {
@@ -614,7 +617,7 @@ func (r *newRun) check(ask Ask, v string, hasDefault bool) error {
 				return fmt.Errorf("the role %s makes the tmux session %s-%s, which the project %s has for its role %s, rename the role", role, r.a.values["name"], role, other, theirs)
 			}
 		}
-		// the lead's skill is .claude/skills/<lead>, so a role named like one of the kit's skills cannot lead
+		// the lead's skill is in the skills folder under its name, so a role named like one of the kit's skills cannot lead
 		skills, reserved := r.k.skillFolders(), 0
 		for _, role := range items {
 			if contains(skills, role) {
@@ -624,9 +627,9 @@ func (r *newRun) check(ask Ask, v string, hasDefault bool) error {
 		switch {
 		case reserved < len(items):
 		case len(items) == 1:
-			return fmt.Errorf("the role %s cannot lead, the lead's skill would take .claude/skills/%s, the folder of the kit's own %s skill, rename the role", items[0], items[0], items[0])
+			return fmt.Errorf("the role %s cannot lead, the lead's skill would take %s/%s, the folder of the kit's own %s skill, rename the role", items[0], r.provider().Kit().Skills, items[0], items[0])
 		default:
-			return fmt.Errorf("none of the roles %s can lead, the lead's skill would take the folder of one of the kit's own skills in .claude/skills, rename one", joinWith(items, "and"))
+			return fmt.Errorf("none of the roles %s can lead, the lead's skill would take the folder of one of the kit's own skills in %s, rename one", joinWith(items, "and"), r.provider().Kit().Skills)
 		}
 	case "workflow.gate":
 		for _, c := range items {
@@ -641,7 +644,7 @@ func (r *newRun) check(ask Ask, v string, hasDefault bool) error {
 			return fmt.Errorf("%q is none of the roles %s", v, joinWith(roles, "and"))
 		}
 		if contains(r.k.skillFolders(), v) {
-			return fmt.Errorf("%s cannot lead, the lead's skill would take .claude/skills/%s, the folder of the kit's own %s skill, pick another role", v, v, v)
+			return fmt.Errorf("%s cannot lead, the lead's skill would take %s/%s, the folder of the kit's own %s skill, pick another role", v, r.provider().Kit().Skills, v, v)
 		}
 	case "workflow.checks":
 		for _, c := range items {

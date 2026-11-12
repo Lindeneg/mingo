@@ -1,6 +1,6 @@
 ---
 name: sub-agents
-description: When and how to delegate to a subagent (the Agent tool), and when not to. Covers the one scoped review per code pull request, bounded explorations, the brief templates, the model and effort to use, read caps, and the rule that every finding is verified before it is acted on. Use before spawning any subagent and whenever a review is due on a pull request.
+description: When and how to delegate to a subagent{{template "agent.subagent-tool" .}}, and when not to. Covers the one scoped review per code pull request, bounded explorations, the brief templates, the model and effort to use, read caps, and the rule that every finding is verified before it is acted on. Use before spawning any subagent and whenever a review is due on a pull request.
 ---
 # Subagents
 
@@ -35,7 +35,7 @@ Paste the diff inline (`git diff {{.Workflow.Base}}...HEAD` or `gh pr diff <n>`)
 ```
 You are reviewing a pull request for {{.Title}}. Report must-fix and should-fix findings only.
 
-Context: <one line: the issue id and what the change does>. {{block "brief-rules" .}}The project's rules are in CLAUDE.md.{{end}}
+Context: <one line: the issue id and what the change does>. {{block "brief-rules" .}}The project's rules are in {{template "agent.instructions" .}}.{{end}}
 
 Diff:
 <the diff>
@@ -70,7 +70,7 @@ Answer with: a list of <file>:<line> entries that bear on the question, then one
 2. Fix the must-fix findings; fix or answer the should-fix ones.
 3. Record in the pull request description under "Review": `scoped review: N findings, M fixed, K rejected (reasons)`. The subagent's report itself is not pasted anywhere.
 4. A fix commit that changed code gets a second pass with the same brief over the fix commit's diff only; a fix that only changed tests or docs does not.
-5. The pull request's own Claude review (the GitHub action) is separate and also runs; its findings are handled the same way.
+5. The pull request's own {{template "agent.review" .}} (the GitHub action) is separate and also runs; its findings are handled the same way.
 
 ## Cost rules
 

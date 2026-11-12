@@ -469,7 +469,7 @@ func (d Deps) plan(mods []Module, files []File, co *checkout, lock *Lock) ([]Ste
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range claudePaths(local) {
+		for _, path := range claudePaths(d.Project.Provider(), local) {
 			if _, ok := co.read(path); ok {
 				return nil, fmt.Errorf("claude_files is local, so Claude's files stay out of the repository, and %s has %s, take it out first", d.Project.Repo, path)
 			}
@@ -477,11 +477,11 @@ func (d Deps) plan(mods []Module, files []File, co *checkout, lock *Lock) ([]Ste
 		scripts, err := PlanScripts(mods, d.Project, co.read)
 		return append(Plan(repo, co.read, lock), scripts...), err
 	}
-	steps := append(Plan(files, co.read, lock), PlanImports(mods, co.read)...)
+	steps := append(Plan(files, co.read, lock), PlanImports(d.Project.Provider().Kit(), mods, co.read)...)
 	scripts, err := PlanScripts(mods, d.Project, co.read)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := PlanSettings(co.read)
+	settings, err := PlanSettings(d.Project.Provider(), co.read)
 	return append(append(steps, scripts...), settings...), err
 }

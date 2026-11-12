@@ -90,7 +90,7 @@ func (e *env) secret(args []string) error {
 	}
 	var token string
 	if fd := os.Stdin.Fd(); sys.IsTerminal(fd) {
-		fmt.Fprint(e.out, "paste what claude setup-token printed: ")
+		fmt.Fprintf(e.out, "paste what %s printed: ", d.Project.Provider().Kit().Review.Token)
 		if sys.SetEcho(fd, false) == nil {
 			defer sys.SetEcho(fd, true)
 			// a signal ends mingo before the defer runs, so the echo comes back here too

@@ -276,10 +276,10 @@ func TestWorkflowDefaultsForAProjectThatSetsNone(t *testing.T) {
 	if w.ReviewLine != "review:" || w.NoFindings != "no findings" || w.ReviewHeading != "## Review" {
 		t.Fatal(w)
 	}
-	if strings.Join(w.LocalRuns, ",") != "mingo gate" || strings.Join(w.Trailers, ",") != "Co-Authored-By,Claude-Session" {
+	if strings.Join(w.LocalRuns, ",") != "mingo gate" || strings.Join(w.Trailers, ",") != "Co-Authored-By" {
 		t.Fatal(w.LocalRuns, w.Trailers)
 	}
-	if !w.IsFooter("🤖 Generated with [Claude Code](https://claude.com/claude-code)") || w.IsFooter("made with Claude Code") {
+	if !w.IsFooter("Made with the test CLI") || w.IsFooter("made with the test CLI, not a footer") {
 		t.Fatal("footers")
 	}
 	if p := mustLoad(t, "bare"); p.Tracker.Kind != "none" {
@@ -334,7 +334,7 @@ func TestWorkflowAndTrackerMistakesAreRefused(t *testing.T) {
 func TestClaudeFilesAreInTheRepoUnlessLocalAndALocalProjectsReviewReadsTheReadme(t *testing.T) {
 	setupHome(t)
 	addProject(t, "kept", `[[roles]]`, `name = "lead"`)
-	if p := mustLoad(t, "kept"); p.ClaudeFiles != "repo" || p.ClaudeLocal() || p.Review.Read != "CLAUDE.md first" {
+	if p := mustLoad(t, "kept"); p.ClaudeFiles != "repo" || p.ClaudeLocal() || p.Review.Read != "AGENTS.md first" {
 		t.Fatal(p.ClaudeFiles, p.Review.Read)
 	}
 	addProject(t, "own", `claude_files = "local"`, `[[roles]]`, `name = "lead"`)

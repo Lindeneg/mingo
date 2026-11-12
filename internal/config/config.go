@@ -140,7 +140,7 @@ type KitNames struct {
 	Modules []string
 	// the modules always on, which a config does not name
 	Always []string
-	// the folders the kit's own skills take under .claude/skills, which the lead's skill cannot share
+	// the folders the kit's own skills take in the skills folder, which the lead's skill cannot share
 	Skills []string
 }
 
@@ -336,11 +336,11 @@ func (p *Project) ClaudeLocal() bool {
 }
 
 // the review on GitHub sees only what the repository has
-func DefaultRead(claudeFiles string) string {
+func DefaultRead(prov provider.Provider, claudeFiles string) string {
 	if claudeFiles == "local" {
 		return "README.md first"
 	}
-	return "CLAUDE.md first"
+	return prov.Kit().Instructions + " first"
 }
 
 func (p *Project) RoleNames() []string {
@@ -438,6 +438,11 @@ func (p *Project) MemoryDir(role string) string {
 
 // the provider of the agent CLI the project's sessions run
 func (p *Project) Provider() provider.Provider {
+	return DefaultProvider()
+}
+
+// the provider of a project that names none
+func DefaultProvider() provider.Provider {
 	prov, ok := provider.Get(provider.Default)
 	if !ok {
 		panic("mingo has no provider " + provider.Default)

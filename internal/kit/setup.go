@@ -12,6 +12,7 @@ import (
 
 	"github.com/Lindeneg/mingo/internal/config"
 	"github.com/Lindeneg/mingo/internal/ojson"
+	"github.com/Lindeneg/mingo/internal/provider"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -322,45 +323,28 @@ func PlanScripts(mods []Module, p *config.Project, read func(path string) ([]byt
 	return []Step{step}, nil
 }
 
-const Settings = ".claude/settings.json"
-
-// Claude Code's own setting for no attribution in commits, pull requests and their session links
-func attributionOff() *ojson.Object {
-	o := ojson.NewObject()
-	o.Set("commit", "")
-	o.Set("pr", "")
-	o.Set("sessionUrl", false)
-	return o
-}
-
-func attributionIsOff(v any) bool {
-	o, ok := v.(*ojson.Object)
-	if !ok {
-		return false
+// the project's settings are its own, so mingo only turns attribution off in them, for a CLI that has
+// the setting
+func PlanSettings(prov provider.Provider, read func(path string) ([]byte, bool)) ([]Step, error) {
+	a, has := prov.(provider.Attribution)
+	if !has {
+		return nil, nil
 	}
-	commit, _ := o.Get("commit")
-	pr, _ := o.Get("pr")
-	session, _ := o.Get("sessionUrl")
-	return commit == "" && pr == "" && session == false
-}
-
-// the project's settings are its own, so mingo only sets the attribution key in them
-func PlanSettings(read func(path string) ([]byte, bool)) ([]Step, error) {
-	old, ok := read(Settings)
+	file := a.AttributionFile()
+	old, ok := read(file)
 	root := ojson.NewObject()
 	if ok {
 		v, err := ojson.Parse(old)
 		o, isObject := v.(*ojson.Object)
 		if err != nil || !isObject {
-			return nil, fmt.Errorf("%s is not a JSON object", Settings)
+			return nil, fmt.Errorf("%s is not a JSON object", file)
 		}
 		root = o
 	}
-	step := Step{File: File{Path: Settings, Module: "sessions", Text: string(old)}, Action: Same, Old: old, Owned: true, What: "the attribution setting"}
-	if have, set := root.Get("attribution"); set && attributionIsOff(have) {
+	step := Step{File: File{Path: file, Module: "sessions", Text: string(old)}, Action: Same, Old: old, Owned: true, What: "the attribution setting"}
+	if a.AttributionOff(root) {
 		return []Step{step}, nil
 	}
-	root.Set("attribution", attributionOff())
 	next, err := ojson.Marshal(root)
 	if err != nil {
 		return nil, err

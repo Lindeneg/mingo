@@ -1,6 +1,6 @@
 ---
 name: task-flow
-description: Take a task from {{if eq .Tracker.Kind "linear"}}a Linear issue{{else if eq .Tracker.Kind "github"}}a GitHub issue{{else}}its start{{end}} to a merged pull request on {{.Workflow.Base}}, through the branch, the CI gate and the Claude review, including the only exception when GitHub Actions is out of usage. Use at the start and the end of every task.
+description: Take a task from {{if eq .Tracker.Kind "linear"}}a Linear issue{{else if eq .Tracker.Kind "github"}}a GitHub issue{{else}}its start{{end}} to a merged pull request on {{.Workflow.Base}}, through the branch, the CI gate and the {{template "agent.review" .}}, including the only exception when GitHub Actions is out of usage. Use at the start and the end of every task.
 ---
 # From issue to merge
 
@@ -24,7 +24,7 @@ description: Take a task from {{if eq .Tracker.Kind "linear"}}a Linear issue{{el
 ## Pull request
 
 8. Open the pull request to `{{.Workflow.Base}}`: {{with .Workflow.Tags}}the role tag line first ({{ticks .}}), a blank line, {{end}}{{if not (eq .Tracker.Kind "none")}}`Closes <issue id>`, then {{end}}what changed, how it was tested, what to look at first.
-9. Wait for CI and for the Claude review. Fix every red job and address every finding on the branch; the next push runs the review again.
+9. Wait for CI and for the {{template "agent.review" .}}. Fix every red job and address every finding on the branch; the next push runs the review again.
 10. Keep the branch up to date with `{{.Workflow.Base}}`; resolve every conversation.{{block "stacked" .}} A branch made from another branch that has since merged by squash is rebased with `git rebase --onto origin/{{.Workflow.Base}} <the old base's head>`, or made again from `origin/{{.Workflow.Base}}` while it has no commit of its own: a plain rebase replays the base's commits onto their own squash and conflicts.{{end}}
 
 ## Merge
@@ -36,7 +36,7 @@ description: Take a task from {{if eq .Tracker.Kind "linear"}}a Linear issue{{el
 When GitHub Actions is out of usage and the checks cannot run:
 
 {{block "exception-checks" .}}* Run the checks of step 6 on the head, nothing skipped.{{end}}
-* Run the review locally with Claude Code over the diff and address its findings.
+* Run the review locally with {{template "agent.cli" .}} over the diff and address its findings.
 {{block "exception-record" .}}* Paste the local results into the pull request description, which the merge check reads: it holds a pull request under the label without the description naming {{orlist .Workflow.LocalRuns}}, a `{{.Workflow.ReviewHeading}}` section and the head's short SHA. Add the label `ci-unavailable`, then {{if many .Roles}}message the {{spaced .Lead}}, who merges{{else}}merge with `mingo pr merge <n>`{{end}}.{{end}}
 * As soon as Actions is back, run the full CI on `{{.Workflow.Base}}` by hand and turn anything it finds into the next {{if eq .Tracker.Kind "none"}}task{{else}}issue{{end}}, at the top of the list.
 

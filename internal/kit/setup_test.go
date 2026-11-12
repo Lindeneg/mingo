@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Lindeneg/mingo/internal/provider/claude"
 	"github.com/Lindeneg/mingo/internal/team"
 )
 
@@ -265,14 +266,14 @@ func TestPlanSettingsSetsOnlyTheAttributionKey(t *testing.T) {
 	} {
 		files := map[string]string{}
 		if c.have != "" {
-			files[Settings] = c.have
+			files[".claude/settings.json"] = c.have
 		}
-		steps, err := PlanSettings(reader(files))
+		steps, err := PlanSettings(claude.Claude{}, reader(files))
 		if err != nil || len(steps) != 1 || steps[0].Action != c.action || steps[0].File.Text != c.want || !steps[0].Owned {
 			t.Fatal(name, steps, err)
 		}
 	}
-	if _, err := PlanSettings(reader(map[string]string{Settings: "[]"})); err == nil {
+	if _, err := PlanSettings(claude.Claude{}, reader(map[string]string{".claude/settings.json": "[]"})); err == nil {
 		t.Fatal("a settings file that is no object")
 	}
 }

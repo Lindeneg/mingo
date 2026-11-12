@@ -8,7 +8,7 @@
 
 ## Working as a team
 
-{{block "team" .}}{{len .Roles}} Claude Code sessions work on this repository at once, each in its own clone, each reachable from the others by name through the session messaging tool: `ListAgents` shows a row `{{.Name}}-<role>` per role. The roles:
+{{block "team" .}}{{len .Roles}} {{template "agent.cli" .}} sessions work on this repository at once, each in its own clone, each reachable from the others by name {{template "agent.reach" .}} per role. The roles:
 
 | Role | Clone | Does |
 |---|---|---|
@@ -37,6 +37,6 @@ The rules:
 5. **One scoped review per code pull request**, by a subagent on the cheaper model: the diff inline, a named list of the files it may read and a cap on its reads, must-fix and should-fix findings only. Every finding is verified before it is acted on. The `sub-agents` skill has the brief.
 6. **Edge cases first.** Before coding a subtle feature, a short list of its edge cases, each with a test. The `edge-cases` skill has the lists.
 7. **Fewer handoffs.** Small docs changes fold into the next code pull request; the merge order is planned to spare rebases.
-8. **A peer's chat has no reader.** The owner reads the {{spaced .Lead}}'s session alone, and the {{spaced .Lead}} reads only what a peer sends it. So the other roles write no summaries for the owner in their own chats; what the {{spaced .Lead}} needs goes by `SendMessage`, and what must last goes to {{if not (eq .Tracker.Kind "none")}}the issue, {{end}}the pull request or the handoff.
+8. **A peer's chat has no reader.** The owner reads the {{spaced .Lead}}'s session alone, and the {{spaced .Lead}} reads only what a peer sends it. So the other roles write no summaries for the owner in their own chats; what the {{spaced .Lead}} needs goes by {{template "agent.send" .}}, and what must last goes to {{if not (eq .Tracker.Kind "none")}}the issue, {{end}}the pull request or the handoff.
 
 Never cut: the author's checks, the one review per code pull request, the tests.{{end}}

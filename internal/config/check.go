@@ -296,9 +296,9 @@ func (p *Project) checkKit() error {
 			return fmt.Errorf("%s names the module %q, which mingo does not have, it has %s", p.File, m, strings.Join(k.Modules, " "))
 		}
 	}
-	// the lead's skill is .claude/skills/<lead>, which would be one of the kit's own skills
+	// the lead's skill is in the skills folder under its name, which would be one of the kit's own skills
 	if slices.Contains(k.Skills, p.Lead) {
-		return fmt.Errorf("%s has the lead %s, whose skill would take .claude/skills/%s, the folder of the kit's own %s skill, make another role the lead or rename this one", p.File, p.Lead, p.Lead, p.Lead)
+		return fmt.Errorf("%s has the lead %s, whose skill would take %s/%s, the folder of the kit's own %s skill, make another role the lead or rename this one", p.File, p.Lead, p.Provider().Kit().Skills, p.Lead, p.Lead)
 	}
 	return nil
 }

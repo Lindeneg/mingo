@@ -1,0 +1,13 @@
+{{define "agent.cli"}}Claude Code{{end}}
+{{define "agent.review"}}Claude review{{end}}
+{{define "agent.reach"}}through the session messaging tool: `ListAgents` shows a row `{{.Name}}-<role>`{{end}}
+{{define "agent.send"}}`SendMessage`{{end}}
+{{define "agent.to-row"}}by `SendMessage` to its row{{end}}
+{{define "agent.tell-lead"}}by `SendMessage` to its row in `ListAgents`, `{{.Name}}-{{.Lead}}`{{end}}
+{{define "agent.list"}}`ListAgents`. Every role has a row named `{{.Name}}-<role>` (the {{spaced .Lead}}'s own row is not listed to itself){{end}}
+{{define "agent.exit"}}`/exit`{{end}}
+{{define "agent.stop-tasks"}} (`TaskStop`){{end}}
+{{define "agent.busy-exit"}} `/exit` is answered with a question while one still runs ("Background work is running"), and the session then reads no message until the loop ends it (below).{{end}}
+{{define "agent.held"}}the CLI answers `/exit` with a question nobody is there to answer when a background task still runs or when the session drafted a feedback note with `SendFeedback` ("You have 1 unsent feedback draft"){{end}}
+{{define "agent.draft"}}; a draft stays on disk for the owner{{end}}
+{{define "agent.subagent-tool"}} (the Agent tool){{end}}
