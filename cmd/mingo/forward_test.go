@@ -127,4 +127,7 @@ func TestTheDefaultProjectIsThisComputersAndNamesAProjectOfAnyHost(t *testing.T)
 	if r := h.mingo("path", "dev"); r.code != 0 || r.out != filepath.Join(dir, "home", "dev", "shop", "dev")+"\n" {
 		t.Fatal(r.out)
 	}
+	if r := h.mingo("doctor"); r.code != 1 || !strings.Contains(r.out, "which project? name it") {
+		t.Fatal(r.out)
+	}
 }

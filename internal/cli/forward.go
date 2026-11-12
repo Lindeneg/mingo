@@ -77,10 +77,18 @@ func (e *env) forward(command string, args []string) (bool, error) {
 	return e.forwardOne(x, command, args, at, where.tty)
 }
 
+// the commands that refuse a missing project rather than take the default one
+var needsName = map[string]bool{"apply": true, "doctor": true, "away": true, "back": true, "service": true,
+	"secret": true, "instructions": true, "project": true}
+
 func (e *env) forwardOne(x *index, command string, args []string, at int, tty bool) (bool, error) {
 	spec := ""
 	if at < len(args) {
 		spec = args[at]
+	}
+	// here it is refused as it always was
+	if spec == "" && needsName[command] {
+		return false, nil
 	}
 	h, target, err := x.resolve(spec)
 	if err != nil {
